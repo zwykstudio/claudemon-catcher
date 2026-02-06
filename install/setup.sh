@@ -1,11 +1,13 @@
 #!/bin/bash
 #
-# Claudemon Setup Script
+# Claudemon Setup Script (macOS + Linux)
 #
 # This script:
-# 1. Downloads the latest frontend from GitHub releases
-# 2. Sets up the server to run at login (launchd)
-# 3. Adds alias to your shell config
+# 1. Checks prerequisites (Python, Claude CLI)
+# 2. Configures API key for cloud mode
+# 3. Sets up the engine daemon (launchd on macOS, systemd on Linux)
+# 4. Cleans up old server daemon if upgrading
+# 5. Adds alias to your shell config
 #
 
 set -e
@@ -13,30 +15,26 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Server daemon (HTTP API + dashboard)
-SERVER_PLIST_NAME="com.claudemon.server"
-SERVER_PLIST_SRC="$SCRIPT_DIR/$SERVER_PLIST_NAME.plist"
-SERVER_PLIST_DEST="$HOME/Library/LaunchAgents/$SERVER_PLIST_NAME.plist"
-
-# Engine daemon (watches catches.jsonl → DB → notifications)
-ENGINE_PLIST_NAME="com.claudemon.engine"
-ENGINE_PLIST_SRC="$SCRIPT_DIR/$ENGINE_PLIST_NAME.plist"
-ENGINE_PLIST_DEST="$HOME/Library/LaunchAgents/$ENGINE_PLIST_NAME.plist"
-
 echo "╔════════════════════════════════════════╗"
 echo "║          CLAUDEMON SETUP               ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
 
-# Check prerequisites
+# Detect OS
 echo "→ Checking prerequisites..."
 
-# Check macOS
-if [[ "$OSTYPE" != "darwin"* ]]; then
-    echo "  ✗ This script only works on macOS"
+OS="unknown"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="macos"
+    echo "  ✓ macOS detected"
+elif [[ "$OSTYPE" == "linux"* ]]; then
+    OS="linux"
+    echo "  ✓ Linux detected"
+else
+    echo "  ✗ Unsupported OS: $OSTYPE (macOS and Linux only)"
+    echo "    Windows: use WSL or run wrapper.py manually"
     exit 1
 fi
-echo "  ✓ macOS detected"
 
 # Check Python
 if ! command -v python3 &> /dev/null; then
@@ -53,28 +51,27 @@ if ! command -v claude &> /dev/null; then
 fi
 echo "  ✓ Claude CLI found"
 
-# Check GitHub CLI
-if ! command -v gh &> /dev/null; then
-    echo "  ✗ GitHub CLI not found."
-    echo "    Install: brew install gh"
-    exit 1
+# Linux: check for notify-send (optional but recommended)
+if [[ "$OS" == "linux" ]]; then
+    if command -v notify-send &> /dev/null; then
+        echo "  ✓ notify-send found (native notifications)"
+    else
+        echo "  ⚠ notify-send not found (install libnotify for native notifications)"
+    fi
 fi
-
-# Check gh authentication
-if ! gh auth status &> /dev/null; then
-    echo "  ✗ GitHub CLI not authenticated."
-    echo "    Run: gh auth login"
-    exit 1
-fi
-echo "  ✓ GitHub CLI authenticated"
 
 echo ""
 
-# Find the correct python3 path (avoid Xcode's sandboxed python)
-if [ -x "/usr/local/bin/python3" ]; then
-    PYTHON_PATH="/usr/local/bin/python3"
-elif [ -x "/opt/homebrew/bin/python3" ]; then
-    PYTHON_PATH="/opt/homebrew/bin/python3"
+# Find the correct python3 path
+if [[ "$OS" == "macos" ]]; then
+    # Avoid Xcode's sandboxed python on macOS
+    if [ -x "/usr/local/bin/python3" ]; then
+        PYTHON_PATH="/usr/local/bin/python3"
+    elif [ -x "/opt/homebrew/bin/python3" ]; then
+        PYTHON_PATH="/opt/homebrew/bin/python3"
+    else
+        PYTHON_PATH="$(which python3)"
+    fi
 else
     PYTHON_PATH="$(which python3)"
 fi
@@ -85,66 +82,138 @@ if python3 -c "import cryptography" 2>/dev/null; then
     echo "  ✓ cryptography already installed"
 else
     echo "  Installing cryptography..."
-    pip3 install --user -q cryptography 2>/dev/null || \
-    pip3 install -q cryptography --break-system-packages 2>/dev/null || \
-    { echo "  ✗ Failed to install. Run: brew install python-cryptography"; exit 1; }
+    if [[ "$OS" == "macos" ]]; then
+        pip3 install --user -q cryptography 2>/dev/null || \
+        pip3 install -q cryptography --break-system-packages 2>/dev/null || \
+        { echo "  ✗ Failed to install. Run: brew install python-cryptography"; exit 1; }
+    else
+        pip3 install --user -q cryptography 2>/dev/null || \
+        pip3 install -q cryptography --break-system-packages 2>/dev/null || \
+        { echo "  ✗ Failed to install. Run: sudo apt install python3-cryptography (or equivalent)"; exit 1; }
+    fi
     echo "  ✓ cryptography installed"
 fi
 echo ""
 
-# 2. Download frontend
-echo "→ Downloading frontend..."
-python3 "$BASE_DIR/server/server.py" --update
+# 2. Configuration
+echo "→ Configuration..."
+
+if [ -n "$CLAUDEMON_API_KEY" ]; then
+    echo "  ✓ CLAUDEMON_API_KEY is set (cloud mode)"
+elif [ "$CLAUDEMON_MODE" = "local" ]; then
+    echo "  ✓ CLAUDEMON_MODE=local (local mode)"
+else
+    echo "  ⚠ No API key found. Cloud mode requires CLAUDEMON_API_KEY."
+    echo ""
+    echo "  To get your key:"
+    echo "    1. Visit https://claudemon.zwyk-studio.com/dashboard/settings"
+    echo "    2. Copy your API key"
+    echo "    3. Add to your shell config:"
+    echo "       export CLAUDEMON_API_KEY=sk_claudemon_..."
+    echo ""
+    echo "  For local-only mode (no cloud sync):"
+    echo "    export CLAUDEMON_MODE=local"
+    echo ""
+fi
 echo ""
 
-# 3. Install launchd plists
-echo "→ Setting up daemons..."
+# 3. Cleanup old server daemon (for upgrades from previous versions)
+echo "→ Cleaning up old server daemon (if present)..."
+
+if [[ "$OS" == "macos" ]]; then
+    OLD_SERVER_PLIST="$HOME/Library/LaunchAgents/com.claudemon.server.plist"
+    if [ -f "$OLD_SERVER_PLIST" ]; then
+        launchctl unload "$OLD_SERVER_PLIST" 2>/dev/null || true
+        rm -f "$OLD_SERVER_PLIST"
+        echo "  ✓ Removed old server daemon (launchd)"
+    else
+        echo "  ✓ No old server daemon found"
+    fi
+else
+    if systemctl --user is-active claudemon-server &>/dev/null || \
+       [ -f "$HOME/.config/systemd/user/claudemon-server.service" ]; then
+        systemctl --user stop claudemon-server 2>/dev/null || true
+        systemctl --user disable claudemon-server 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/claudemon-server.service"
+        systemctl --user daemon-reload 2>/dev/null || true
+        echo "  ✓ Removed old server daemon (systemd)"
+    else
+        echo "  ✓ No old server daemon found"
+    fi
+fi
+echo ""
+
+# 4. Install engine daemon
+echo "→ Setting up engine daemon..."
 echo "  Using Python: $PYTHON_PATH"
 
-mkdir -p "$HOME/Library/LaunchAgents"
+if [[ "$OS" == "macos" ]]; then
+    # ── macOS: launchd ──
+    ENGINE_PLIST_NAME="com.claudemon.engine"
+    ENGINE_PLIST_SRC="$SCRIPT_DIR/$ENGINE_PLIST_NAME.plist"
+    ENGINE_PLIST_DEST="$HOME/Library/LaunchAgents/$ENGINE_PLIST_NAME.plist"
 
-# Server daemon
-if launchctl list | grep -q "$SERVER_PLIST_NAME"; then
-    echo "  Stopping existing server..."
-    launchctl unload "$SERVER_PLIST_DEST" 2>/dev/null || true
-fi
-sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" "$SERVER_PLIST_SRC" > "$SERVER_PLIST_DEST"
-launchctl load "$SERVER_PLIST_DEST"
-echo "  ✓ Server daemon installed (HTTP API + dashboard)"
+    mkdir -p "$HOME/Library/LaunchAgents"
 
-# Engine daemon
-if launchctl list | grep -q "$ENGINE_PLIST_NAME"; then
-    echo "  Stopping existing engine..."
-    launchctl unload "$ENGINE_PLIST_DEST" 2>/dev/null || true
+    if launchctl list | grep -q "$ENGINE_PLIST_NAME"; then
+        echo "  Stopping existing engine..."
+        launchctl unload "$ENGINE_PLIST_DEST" 2>/dev/null || true
+    fi
+    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" "$ENGINE_PLIST_SRC" > "$ENGINE_PLIST_DEST"
+    launchctl load "$ENGINE_PLIST_DEST"
+    echo "  ✓ Engine daemon installed (launchd)"
+
+else
+    # ── Linux: systemd user service ──
+    SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+
+    systemctl --user stop claudemon-engine 2>/dev/null || true
+    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" \
+        "$SCRIPT_DIR/claudemon-engine.service" > "$SYSTEMD_DIR/claudemon-engine.service"
+    systemctl --user daemon-reload
+    systemctl --user enable --now claudemon-engine
+    echo "  ✓ Engine daemon installed (systemd)"
 fi
-sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" "$ENGINE_PLIST_SRC" > "$ENGINE_PLIST_DEST"
-launchctl load "$ENGINE_PLIST_DEST"
-echo "  ✓ Engine daemon installed (catches → DB → notifications)"
 echo ""
 
-# 4. Shell alias
+# 5. Shell alias
+SHELL_RC=""
+if [ -f "$HOME/.zshrc" ]; then
+    SHELL_RC="~/.zshrc"
+elif [ -f "$HOME/.bashrc" ]; then
+    SHELL_RC="~/.bashrc"
+else
+    SHELL_RC="~/.bashrc"
+fi
+
 echo "→ Shell configuration"
 echo ""
-echo "  Add this alias to your shell config (~/.zshrc or ~/.bashrc):"
+echo "  Add this alias to your shell config ($SHELL_RC):"
 echo ""
 echo "    alias cc='python3 $BASE_DIR/wrapper.py'"
 echo ""
 echo "  Or run this command:"
 echo ""
-echo "    echo \"alias cc='python3 $BASE_DIR/wrapper.py'\" >> ~/.zshrc"
+echo "    echo \"alias cc='python3 $BASE_DIR/wrapper.py'\" >> $SHELL_RC"
 echo ""
 
-# 5. Done
+# 6. Done
 echo "╔════════════════════════════════════════╗"
 echo "║            SETUP COMPLETE              ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
-echo "  Dashboard: http://localhost:17712"
+echo "  Dashboard: https://claudemon.zwyk-studio.com/dashboard"
 echo "  CLI:       cc [args...]"
 echo "  Open:      cc --dashboard"
 echo ""
-echo "  To update frontend: python3 $BASE_DIR/server/server.py --update"
-echo "  To stop daemons:"
-echo "    launchctl unload ~/Library/LaunchAgents/$SERVER_PLIST_NAME.plist"
-echo "    launchctl unload ~/Library/LaunchAgents/$ENGINE_PLIST_NAME.plist"
+if [[ "$OS" == "macos" ]]; then
+    echo "  To stop the engine:"
+    echo "    launchctl unload ~/Library/LaunchAgents/com.claudemon.engine.plist"
+else
+    echo "  To stop the engine:"
+    echo "    systemctl --user stop claudemon-engine"
+    echo "  To view logs:"
+    echo "    journalctl --user -u claudemon-engine -f"
+fi
 echo ""

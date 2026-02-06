@@ -2,6 +2,7 @@
 *.db
 *.db-shm
 *.db-wal
+*.jsonl
 creatures/
 
 # Python
@@ -17,6 +18,9 @@ venv/
 # Temp
 /tmp/
 *.log
+
+# Tests
+.pytest_cache/
 
 # macOS
 .DS_Store

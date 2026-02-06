@@ -6,11 +6,10 @@ Watches ~/.claudemon/catches.jsonl for new catches and processes them:
 - Updates storage (local SQLite or cloud platform)
 - Triggers notifications (new/hatched/evolved)
 
-This runs as a background daemon, started by launchd.
+This runs as a background daemon (launchd on macOS, systemd on Linux).
 
-Environment:
-    CLAUDEMON_MODE: "local" (default) or "cloud"
-    CLAUDEMON_API_KEY: Required for cloud mode (sk_claudemon_...)
+Cloud mode is the default (requires CLAUDEMON_API_KEY).
+Set CLAUDEMON_MODE=local for local-only operation.
 """
 
 import json
@@ -22,7 +21,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.storage import get_storage
+from engine.storage import get_storage, ConfigError
 from engine.notifications import notify_catch
 
 # Configuration
@@ -36,7 +35,12 @@ def watch_catches():
     if not os.path.exists(CATCHES_FILE):
         Path(CATCHES_FILE).touch()
 
-    storage = get_storage()
+    try:
+        storage = get_storage()
+    except ConfigError as e:
+        print(f"[engine] Configuration error:\n{e}", file=sys.stderr)
+        sys.exit(1)
+
     mode = "cloud" if type(storage).__name__ == "CloudStorage" else "local"
     print(f"[engine] Mode: {mode}")
     print(f"[engine] Watching {CATCHES_FILE}")
@@ -52,6 +56,7 @@ def watch_catches():
                     handle_catch(
                         storage, catch["word"],
                         ts=catch.get("ts"), proof=catch.get("proof"), sid=catch.get("sid"),
+                        duration=catch.get("duration"),
                     )
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"[engine] Invalid catch line: {e}", file=sys.stderr)
@@ -59,12 +64,12 @@ def watch_catches():
                 time.sleep(POLL_INTERVAL)
 
 
-def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: str = None):
+def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None):
     """Process a caught word: update storage and send notifications."""
-    print(f"[engine] Catch: {word} (sid={sid})")
+    print(f"[engine] Catch: {word} (sid={sid}, duration={duration})")
 
     try:
-        result = storage.catch(word, ts=ts, proof=proof, sid=sid)
+        result = storage.catch(word, ts=ts, proof=proof, sid=sid, duration=duration)
         if result is None:
             print(f"[engine] Storage failed for {word}", file=sys.stderr)
             return

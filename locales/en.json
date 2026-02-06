@@ -51,14 +51,11 @@
     ]
   },
   "cli": {
-    "banner": "claudemon: {count} creatures",
-    "no_claudemon": "No claudemon discovered yet.",
-    "error_not_found": "Error: 'claude' not found in PATH"
+    "no_claudemon": "No claudemon discovered yet."
   },
   "stats": {
     "discovered": "Discovered",
     "total_catches": "Total catches",
-    "max_level": "Max level",
-    "evolutions": "Evolutions"
+    "max_level": "Max level"
   }
 }

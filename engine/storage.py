@@ -2,10 +2,14 @@
 storage.py - Storage adapter for Claudemon engine.
 
 Provides a unified interface for local (SQLite) and cloud (Platform API) modes.
-Selected via environment variable CLAUDEMON_MODE=local|cloud.
+
+Mode logic:
+    - Default = cloud: requires CLAUDEMON_API_KEY (sk_claudemon_...)
+    - Local = opt-in: CLAUDEMON_MODE=local
+    - API key + local mode = error (pick one)
 
 Usage:
-    from engine.storage import get_storage
+    from engine.storage import get_storage, ConfigError
     storage = get_storage()
     result = storage.catch("Zigzagging")
 """
@@ -16,6 +20,13 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Optional
+
+SAAS_URL = "https://claudemon.zwyk-studio.com"
+
+
+class ConfigError(Exception):
+    """Raised when Claudemon configuration is invalid or incomplete."""
+    pass
 
 
 @dataclass
@@ -47,7 +58,7 @@ class LocalStorage:
         from engine.database import init_db
         init_db()
 
-    def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None) -> CatchResult:
+    def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None) -> CatchResult:
         from engine.database import catch_word
         result = catch_word(word)
         return CatchResult.from_dict(word, result)
@@ -82,7 +93,7 @@ class CloudStorage:
 
     def __init__(self):
         self.base_url = os.environ.get(
-            "CLAUDEMON_CLOUD_URL", "https://claudemon.zwyk-studio.com"
+            "CLAUDEMON_CLOUD_URL", SAAS_URL
         ).rstrip("/")
         self.api_key = os.environ.get("CLAUDEMON_API_KEY", "")
         self.timeout = 5
@@ -105,7 +116,7 @@ class CloudStorage:
                 print(f"[cloud] {method} {path}: {e}", file=sys.stderr)
             return None
 
-    def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None) -> Optional[CatchResult]:
+    def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None) -> Optional[CatchResult]:
         payload = {"word": word}
         if ts is not None:
             payload["ts"] = ts
@@ -113,6 +124,8 @@ class CloudStorage:
             payload["proof"] = proof
         if sid is not None:
             payload["sid"] = sid
+        if duration is not None:
+            payload["duration"] = round(duration, 3)
         result = self._request("POST", "/api/v1/sync", payload)
         if result is None:
             return None
@@ -144,11 +157,42 @@ class CloudStorage:
 
 
 def get_storage() -> LocalStorage | CloudStorage:
-    """Return the appropriate storage backend based on CLAUDEMON_MODE."""
-    mode = os.environ.get("CLAUDEMON_MODE", "local").lower()
-    api_key = os.environ.get("CLAUDEMON_API_KEY", "")
+    """Return the appropriate storage backend.
 
-    if mode == "cloud" and api_key.startswith("sk_claudemon_"):
-        return CloudStorage()
+    Mode logic:
+        - No mode set (or empty) → cloud mode, requires CLAUDEMON_API_KEY
+        - CLAUDEMON_MODE=local → local mode, refuses if API key is also set
+        - Any other value → error
 
-    return LocalStorage()
+    Raises:
+        ConfigError: If configuration is invalid or incomplete.
+    """
+    mode = os.environ.get("CLAUDEMON_MODE", "").lower().strip()
+    api_key = os.environ.get("CLAUDEMON_API_KEY", "").strip()
+
+    if mode == "local":
+        if api_key:
+            raise ConfigError(
+                "CLAUDEMON_API_KEY is set but CLAUDEMON_MODE=local.\n"
+                "Pick one: remove the API key for local mode, or remove CLAUDEMON_MODE for cloud."
+            )
+        return LocalStorage()
+
+    if mode and mode != "cloud":
+        raise ConfigError(
+            f"Unknown CLAUDEMON_MODE='{mode}'.\n"
+            "Valid options: remove CLAUDEMON_MODE (cloud, default) or CLAUDEMON_MODE=local"
+        )
+
+    # Cloud mode (default)
+    if not api_key or not api_key.startswith("sk_claudemon_"):
+        raise ConfigError(
+            "Claudemon cloud mode requires an API key.\n"
+            f"  1. Get your key at {SAAS_URL}/dashboard/settings\n"
+            "  2. Export it:  export CLAUDEMON_API_KEY=sk_claudemon_...\n"
+            "\n"
+            "For local-only mode (no cloud sync):\n"
+            "  export CLAUDEMON_MODE=local"
+        )
+
+    return CloudStorage()

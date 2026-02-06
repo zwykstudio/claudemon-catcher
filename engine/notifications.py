@@ -3,11 +3,13 @@ notifications.py - Notification system for Claudemon engine.
 
 Handles sending notifications through:
 - Native macOS notifications (via terminal-notifier if available)
-- Web dashboard (via HTTP POST to local server)
+- Native Linux notifications (via notify-send / libnotify)
+- Webhook (via HTTP POST to CLAUDEMON_WEBHOOK_URL, local mode only)
 """
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -16,9 +18,6 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-
-# Server port for web dashboard
-DEFAULT_PORT = 17712
 
 # i18n support
 LOCALE_DIR = Path(__file__).parent.parent / "locales"
@@ -59,24 +58,21 @@ def _(key, **kwargs):
     return key
 
 
-def notify(title, message, word=None, level=None, notif_type="info"):
-    """
-    Send notification to web dashboard + native macOS (if available).
+def _get_creature_icon(word, level):
+    """Get creature image path if it exists on disk."""
+    if word and level:
+        img_path = Path(__file__).parent.parent / "creatures" / f"{word}-lvl{level}.png"
+        if img_path.exists():
+            return str(img_path)
+    return None
 
-    Args:
-        title: Notification title
-        message: Notification body
-        word: Claudemon word (for image)
-        level: Claudemon level (for image stage)
-        notif_type: 'new', 'hatched', 'evolved', 'info'
-    """
-    # Check if native notifications are available
-    has_native = shutil.which("terminal-notifier") is not None
-    native_sent = False
 
-    # 1. Try native macOS notification first (if installed)
-    if has_native:
-        try:
+def _send_native_notification(title, message, word=None, level=None):
+    """Send a native OS notification. Returns True if sent successfully."""
+    system = platform.system()
+
+    try:
+        if system == "Darwin" and shutil.which("terminal-notifier"):
             native_title = f"✦ {word.upper() if word else title} ✦" if word else title
             cmd = [
                 "terminal-notifier",
@@ -86,44 +82,81 @@ def notify(title, message, word=None, level=None, notif_type="info"):
                 "-group", "claudemon",
                 "-ignoreDnD",
             ]
-
-            # Add icon if creature image exists on disk
-            if word and level:
-                img_path = Path(__file__).parent.parent / "creatures" / f"{word}-lvl{level}.png"
-                if img_path.exists():
-                    cmd.extend(["-contentImage", str(img_path)])
-
+            icon = _get_creature_icon(word, level)
+            if icon:
+                cmd.extend(["-contentImage", icon])
             subprocess.run(cmd, capture_output=True, timeout=2)
-            native_sent = True
-        except Exception:
-            pass
+            return True
 
-    # 2. Send to web dashboard
-    try:
-        data = json.dumps({
-            "type": notif_type,
-            "title": title,
-            "message": message,
-            "word": word,
-            "level": level,
-            "native_sent": native_sent
-        }).encode()
+        elif system == "Linux" and shutil.which("notify-send"):
+            native_title = f"✦ {word.upper() if word else title} ✦" if word else title
+            cmd = [
+                "notify-send",
+                f"Claudemon — {native_title}",
+                message,
+                "--app-name=Claudemon",
+            ]
+            icon = _get_creature_icon(word, level)
+            if icon:
+                cmd.extend(["--icon", icon])
+            subprocess.run(cmd, capture_output=True, timeout=2)
+            return True
 
-        req = urllib.request.Request(
-            f"http://localhost:{DEFAULT_PORT}/api/notify",
-            data=data,
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req, timeout=1)
-    except (urllib.error.URLError, Exception):
+    except Exception:
         pass
 
+    return False
 
-def notify_async(title, message, word=None, level=None, notif_type="info"):
-    """Send a notification in background without blocking."""
-    def _notify():
-        notify(title, message, word, level, notif_type)
-    threading.Thread(target=_notify, daemon=True).start()
+
+def _send_webhook(event, word=None, level=None, is_new=False, evolved=False, just_hatched=False):
+    """Send a webhook POST to CLAUDEMON_WEBHOOK_URL (local mode only)."""
+    webhook_url = os.environ.get("CLAUDEMON_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        return
+
+    # Only send webhooks in local mode
+    mode = os.environ.get("CLAUDEMON_MODE", "").lower().strip()
+    if mode != "local":
+        return
+
+    payload = {
+        "event": event,
+        "word": word,
+        "level": level,
+        "is_new": is_new,
+        "evolved": evolved,
+        "just_hatched": just_hatched,
+        "timestamp": time.time(),
+    }
+
+    try:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3)
+    except (urllib.error.URLError, Exception):
+        if os.environ.get("CLAUDEMON_DEBUG"):
+            import traceback
+            print(f"[webhook] Error sending to {webhook_url}:", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+
+
+def _send_webhook_async(event, **kwargs):
+    """Fire-and-forget webhook send in a background thread."""
+    threading.Thread(
+        target=_send_webhook, args=(event,), kwargs=kwargs, daemon=True
+    ).start()
+
+
+def notify_async(title, message, word=None, level=None):
+    """Send a native notification in background without blocking."""
+    threading.Thread(
+        target=_send_native_notification, args=(title, message, word, level), daemon=True
+    ).start()
 
 
 def notify_catch(word, result, stats):
@@ -148,8 +181,9 @@ def notify_catch(word, result, stats):
             _("notifications.new_discovered", word=word) if has_image else _("notifications.new_no_image", word=word),
             word=word,
             level=1 if has_image else None,
-            notif_type="new"
+
         )
+        _send_webhook_async("new", word=word, level=1, is_new=True)
 
     elif just_hatched:
         # Egg hatched!
@@ -158,8 +192,9 @@ def notify_catch(word, result, stats):
             _("notifications.hatched_msg", level=new_level),
             word=word,
             level=1,
-            notif_type="hatched"
+
         )
+        _send_webhook_async("hatched", word=word, level=new_level, just_hatched=True)
 
     elif evolved:
         # Evolution!
@@ -171,5 +206,10 @@ def notify_catch(word, result, stats):
             _("notifications.evolved_msg", level=new_level),
             word=word,
             level=stage,
-            notif_type="evolved"
+
         )
+        _send_webhook_async("evolved", word=word, level=new_level, evolved=True)
+
+    else:
+        # Regular catch — webhook only (no native notification for every catch)
+        _send_webhook_async("catch", word=word, level=new_level)

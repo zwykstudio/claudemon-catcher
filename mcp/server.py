@@ -23,7 +23,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.storage import get_storage
+from engine.storage import get_storage, ConfigError
 
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 
@@ -96,7 +96,10 @@ def format_creature(c: dict) -> str:
 
 def handle_tool(name: str, args: dict) -> str:
     """Execute a tool and return the result as text."""
-    storage = get_storage()
+    try:
+        storage = get_storage()
+    except ConfigError as e:
+        return f"Configuration error: {e}"
 
     if name == "claudemon_collection":
         creatures = storage.get_all()

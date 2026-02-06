@@ -9,11 +9,12 @@ Storage backends:
     - CloudStorage: Platform API (CLAUDEMON_API_KEY required)
 """
 
-from engine.storage import get_storage, CatchResult, LocalStorage, CloudStorage
+from engine.storage import get_storage, ConfigError, CatchResult, LocalStorage, CloudStorage
 from engine.notifications import notify_catch, notify_async
 
 __all__ = [
     "get_storage",
+    "ConfigError",
     "CatchResult",
     "LocalStorage",
     "CloudStorage",

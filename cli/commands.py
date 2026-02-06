@@ -11,8 +11,9 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.database import get_all_claudemons, get_stats
+from engine.storage import get_storage, ConfigError
 
+SAAS_URL = "https://claudemon.zwyk-studio.com"
 
 # i18n - load locale from JSON
 LOCALE_DIR = Path(__file__).parent.parent / "locales"
@@ -51,9 +52,22 @@ def _(key, **kwargs):
     return key
 
 
+def _get_storage():
+    """Get storage with user-friendly error handling."""
+    try:
+        return get_storage()
+    except ConfigError as e:
+        print(f"\n  Configuration error:\n  {e}\n", file=sys.stderr)
+        sys.exit(1)
+
+
 def show_stats():
     """Display statistics."""
-    stats = get_stats()
+    storage = _get_storage()
+    stats = storage.get_stats()
+    if not stats:
+        print("  No stats available.")
+        return
     print(f"\n{'='*40}")
     print("  CLAUDEMON STATS")
     print(f"{'='*40}")
@@ -65,7 +79,8 @@ def show_stats():
 
 def show_list():
     """List all claudemons."""
-    claudemons = get_all_claudemons()
+    storage = _get_storage()
+    claudemons = storage.get_all()
     if not claudemons:
         print(_("cli.no_claudemon"))
         return
@@ -78,15 +93,13 @@ def show_list():
     print()
 
 
-def serve_web():
-    """Start a web server to view the collection."""
-    from server.server import run_server
-    run_server()
-
-
 def open_dashboard():
     """Open the dashboard in the default browser."""
-    DEFAULT_PORT = 17712
-    url = f"http://localhost:{DEFAULT_PORT}"
+    mode = os.environ.get("CLAUDEMON_MODE", "").lower().strip()
+    if mode == "local":
+        print("  Dashboard is not available in local mode.")
+        print(f"  Switch to cloud mode to access: {SAAS_URL}/dashboard")
+        return
+    url = f"{SAAS_URL}/dashboard"
     print(f"Opening {url}...")
     webbrowser.open(url)

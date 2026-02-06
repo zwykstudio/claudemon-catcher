@@ -1,0 +1,15 @@
+[Unit]
+Description=Claudemon Engine - watches catches and updates database
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=__PYTHON_PATH__ __CLAUDEMON_DIR__/engine/engine.py
+WorkingDirectory=__CLAUDEMON_DIR__
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
