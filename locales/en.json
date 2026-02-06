@@ -1,0 +1,64 @@
+{
+  "notifications": {
+    "new_title": [
+      "Wild Claudemon!",
+      "New Discovery!",
+      "Caught one!",
+      "Got it!",
+      "First catch!"
+    ],
+    "new_discovered": [
+      "A wild {word} appeared!",
+      "{word} joined your collection!",
+      "You discovered {word}!",
+      "{word} was caught!",
+      "Nice! {word} is yours!"
+    ],
+    "new_no_image": [
+      "A mysterious {word} appeared!",
+      "{word} emerged from the void!",
+      "You found {word}! (still evolving...)",
+      "{word} is shy - no picture yet!",
+      "Rare find: {word}!"
+    ],
+    "hatched_title": [
+      "{word} hatched!",
+      "It's alive!",
+      "Egg cracked!",
+      "Welcome, {word}!",
+      "Birth of {word}!"
+    ],
+    "hatched_msg": [
+      "Level {level} - Hello world!",
+      "Level {level} - Ready to grow!",
+      "Level {level} - Born to code!",
+      "Level {level} - Let's go!",
+      "Level {level} - Fresh start!"
+    ],
+    "evolved_title": [
+      "{word} evolved!",
+      "Evolution!",
+      "Power up!",
+      "{word} transformed!",
+      "Level up!"
+    ],
+    "evolved_msg": [
+      "Level {level} - New form unlocked!",
+      "Level {level} - Getting stronger!",
+      "Level {level} - Impressive growth!",
+      "Level {level} - What a glow-up!",
+      "Level {level} - Final form?"
+    ]
+  },
+  "cli": {
+    "banner": "claudemon: {count} creatures",
+    "no_claudemon": "No claudemon discovered yet.",
+    "error_not_found": "Error: 'claude' not found in PATH"
+  },
+  "stats": {
+    "discovered": "Discovered",
+    "total_catches": "Total catches",
+    "max_level": "Max level",
+    "evolutions": "Evolutions"
+  }
+}

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claudemon.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_PATH__</string>
+        <string>__CLAUDEMON_DIR__/server/server.py</string>
+        <string>17712</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__CLAUDEMON_DIR__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/claudemon-server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/claudemon-server.log</string>
+</dict>
+</plist>

@@ -1,0 +1,26 @@
+# Data
+*.db
+*.db-shm
+*.db-wal
+creatures/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+
+# Temp
+/tmp/
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
