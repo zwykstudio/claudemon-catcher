@@ -14,9 +14,13 @@ Usage:
     result = storage.catch("Zigzagging")
 """
 
+import http.client
 import json
 import os
+import ssl
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Optional
@@ -98,26 +102,90 @@ class CloudStorage:
         self.api_key = os.environ.get("CLAUDEMON_API_KEY", "")
         self.timeout = 5
         self.last_error = None
+        # Connection pooling
+        parsed = urllib.parse.urlparse(self.base_url)
+        self._scheme = parsed.scheme
+        self._host = parsed.hostname
+        self._port = parsed.port
+        self._conn = None
+
+    def _get_conn(self) -> http.client.HTTPConnection:
+        """Return a persistent HTTP(S) connection, creating one if needed."""
+        if self._conn is not None:
+            return self._conn
+        if self._scheme == "https":
+            self._conn = http.client.HTTPSConnection(
+                self._host, self._port, timeout=self.timeout,
+                context=ssl.create_default_context(),
+            )
+        else:
+            self._conn = http.client.HTTPConnection(
+                self._host, self._port, timeout=self.timeout,
+            )
+        return self._conn
+
+    def _close_conn(self):
+        """Close and discard the current connection."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
 
     def _request(self, method: str, path: str, data: dict = None) -> Optional[dict]:
-        """Make an authenticated API request."""
-        url = f"{self.base_url}{path}"
+        """Make an authenticated API request using a persistent connection."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         body = json.dumps(data).encode() if data else None
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            conn = self._get_conn()
+            conn.request(method, path, body=body, headers=headers)
+            resp = conn.getresponse()
+            resp_body = resp.read()
+            if 200 <= resp.status < 300:
                 self.last_error = None
-                return json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            self.last_error = f"HTTP {e.code} on {method} {path}"
+                return json.loads(resp_body.decode())
+            self.last_error = f"HTTP {resp.status} on {method} {path}"
             return None
-        except (urllib.error.URLError, Exception) as e:
+        except (http.client.HTTPException, OSError, ConnectionError) as e:
             self.last_error = f"{method} {path}: {e}"
+            self._close_conn()
             return None
+
+    def _request_with_retry(self, method: str, path: str, data: dict = None, max_retries: int = 3) -> Optional[dict]:
+        """_request with exponential backoff for transient errors (5xx, timeout, connection)."""
+        last_result = None
+        for attempt in range(max_retries + 1):
+            try:
+                conn = self._get_conn()
+                body = json.dumps(data).encode() if data else None
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                conn.request(method, path, body=body, headers=headers)
+                resp = conn.getresponse()
+                resp_body = resp.read()
+                if 200 <= resp.status < 300:
+                    self.last_error = None
+                    return json.loads(resp_body.decode())
+                if resp.status >= 500 and attempt < max_retries:
+                    self.last_error = f"HTTP {resp.status} on {method} {path}"
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+                self.last_error = f"HTTP {resp.status} on {method} {path}"
+                return None
+            except (http.client.HTTPException, OSError, ConnectionError) as e:
+                self.last_error = f"{method} {path}: {e}"
+                self._close_conn()
+                if attempt < max_retries:
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+                return None
+        return last_result
 
     def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None) -> Optional[CatchResult]:
         payload = {"word": word}
@@ -129,9 +197,11 @@ class CloudStorage:
             payload["sid"] = sid
         if duration is not None:
             payload["duration"] = round(duration, 3)
-        result = self._request("POST", "/api/v1/sync", payload)
+        result = self._request_with_retry("POST", "/api/v1/sync", payload)
         if result is None:
             return None
+        if os.environ.get("CLAUDEMON_DEBUG"):
+            print(f"[cloud] sync response for {word}: {json.dumps(result, default=str)[:300]}")
         return CatchResult.from_dict(word, result)
 
     def get_creature(self, word: str) -> Optional[dict]:

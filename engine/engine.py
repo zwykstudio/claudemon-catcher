@@ -28,7 +28,25 @@ from engine.notifications import notify_catch
 # Configuration
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 STATUSLINE_FILE = os.path.expanduser("~/.claudemon/statusline.json")
+POSITION_FILE = os.path.expanduser("~/.claudemon/engine.pos")
 POLL_INTERVAL = 0.5  # seconds
+
+
+def _load_position(default: int) -> int:
+    """Load the saved byte offset, or return default if no position file."""
+    try:
+        with open(POSITION_FILE, "r") as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return default
+
+
+def _save_position(pos: int):
+    """Atomically save the byte offset."""
+    tmp = POSITION_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(str(pos))
+    os.replace(tmp, POSITION_FILE)
 
 
 def watch_catches():
@@ -47,8 +65,15 @@ def watch_catches():
     print(f"[engine] Mode: {mode}")
     print(f"[engine] Watching {CATCHES_FILE}")
 
+    file_size = os.path.getsize(CATCHES_FILE)
+    saved_pos = _load_position(default=file_size)
+
     with open(CATCHES_FILE, "r") as f:
-        f.seek(0, 2)  # Seek to end
+        if saved_pos > file_size:
+            # File was truncated — start from beginning
+            f.seek(0)
+        elif saved_pos <= file_size:
+            f.seek(saved_pos)
 
         while True:
             line = f.readline()
@@ -62,6 +87,7 @@ def watch_catches():
                     )
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"[engine] Invalid catch line: {e}", file=sys.stderr)
+                _save_position(f.tell())
             else:
                 time.sleep(POLL_INTERVAL)
 
@@ -99,10 +125,18 @@ def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: s
     try:
         result = storage.catch(word, ts=ts, proof=proof, sid=sid, duration=duration)
         if result is None:
-            print(f"[engine] Storage failed for {word}", file=sys.stderr)
+            err = getattr(storage, 'last_error', 'unknown')
+            print(f"[engine] Storage failed for {word}: {err}", file=sys.stderr)
             return
 
         _session_catches += 1
+        flags = []
+        if result.is_new: flags.append("NEW")
+        if result.just_hatched: flags.append("HATCHED")
+        if result.evolved: flags.append("EVOLVED")
+        tag = f" [{', '.join(flags)}]" if flags else ""
+        print(f"[engine] Synced: {word} lvl={result.new_level}{tag}")
+
         creature = storage.get_creature(word)
         notify_catch(word, result.__dict__, creature)
         update_statusline(word, result, _session_catches)

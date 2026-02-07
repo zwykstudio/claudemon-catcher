@@ -9,7 +9,7 @@ Alias:  alias cc='python3 /path/to/wrapper.py'
 Output: ~/.claudemon/catches.jsonl
 """
 
-import hashlib, hmac, json, os, platform, re, shutil, sys, time, uuid
+import atexit, hashlib, hmac, json, os, platform, re, shutil, sys, time, uuid
 
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 DEBUG = os.environ.get("CLAUDEMON_DEBUG", "") == "1"
@@ -22,6 +22,16 @@ SPINNER_CHARS = "·✢✳✶✻✽"
 WORD_RE = re.compile(r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z-]*ing)…")
 
 
+def _close_debug():
+    global _debug_f
+    if _debug_f is not None:
+        try:
+            _debug_f.close()
+        except Exception:
+            pass
+        _debug_f = None
+
+
 def dbg(msg: str) -> None:
     global _debug_f
     if not DEBUG:
@@ -30,6 +40,7 @@ def dbg(msg: str) -> None:
         os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
         _debug_f = open(DEBUG_LOG, "a")
         _debug_f.write(f"\n{'='*60}\n[{time.strftime('%H:%M:%S')}] wrapper started (PID {os.getpid()})\n{'='*60}\n")
+        atexit.register(_close_debug)
     _debug_f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
     _debug_f.flush()
 
@@ -215,7 +226,7 @@ def _main_windows() -> None:
             if msvcrt.kbhit():
                 pty_proc.write(msvcrt.getwch())
             else:
-                time.sleep(0.005)
+                time.sleep(0.02)
 
     threading.Thread(target=stdin_reader, daemon=True).start()
 
@@ -227,7 +238,7 @@ def _main_windows() -> None:
                 sys.stdout.flush()
                 buf = process_chunk(data_str.encode("utf-8"), buf, seen, pending, session_hash, sid)
             else:
-                time.sleep(0.01)
+                time.sleep(0.03)
             flush_pending(pending, sid)
 
         data_str = pty_proc.read(4096, blocking=False)

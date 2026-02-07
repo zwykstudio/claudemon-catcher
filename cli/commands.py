@@ -4,6 +4,7 @@ commands.py - CLI command implementations for Claudemon.
 
 import json
 import os
+import random
 import sys
 import webbrowser
 from pathlib import Path
@@ -67,8 +68,6 @@ STRINGS = load_locale(LOCALE)
 
 
 def _(key, **kwargs):
-    import random
-
     parts = key.split(".")
     value = STRINGS
     for part in parts:
@@ -196,11 +195,12 @@ def show_list():
 
 def open_dashboard():
     mode = os.environ.get("CLAUDEMON_MODE", "").lower().strip()
+    base = os.environ.get("CLAUDEMON_CLOUD_URL", SAAS_URL).rstrip("/")
     if mode == "local":
         print(f"\n  {_c(YLW, 'Dashboard is not available in local mode.')}")
-        print(f"  {_c(D, f'Switch to cloud mode to access: {SAAS_URL}/dashboard')}")
+        print(f"  {_c(D, f'Switch to cloud mode to access: {base}/dashboard')}")
         print()
         return
-    url = f"{SAAS_URL}/dashboard"
+    url = f"{base}/dashboard"
     print(f"  Opening {_c(CYN, url)}...")
     webbrowser.open(url)

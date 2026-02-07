@@ -10,6 +10,7 @@ Handles sending notifications through:
 import json
 import os
 import platform
+import random
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # i18n support
@@ -38,8 +40,6 @@ def load_locale(lang="en"):
 
 def _(key, **kwargs):
     """Get translated string with optional formatting."""
-    import random
-
     global STRINGS
     if not STRINGS:
         STRINGS = load_locale(LOCALE)
@@ -165,18 +165,21 @@ def _send_webhook(event, word=None, level=None, is_new=False, evolved=False, jus
             traceback.print_exc(file=sys.stderr)
 
 
+_notification_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="claudemon-notify")
+
+
 def _send_webhook_async(event, **kwargs):
     """Fire-and-forget webhook send in a background thread."""
-    threading.Thread(
-        target=_send_webhook, args=(event,), kwargs=kwargs, daemon=True
-    ).start()
+    _notification_pool.submit(_send_webhook, event, **kwargs)
 
 
 def notify_async(title, message, word=None, level=None):
-    """Send a native notification in background without blocking."""
-    threading.Thread(
-        target=_send_native_notification, args=(title, message, word, level), daemon=True
-    ).start()
+    """Send a native notification in background without blocking.
+    Skipped when CLAUDEMON_CLOUD_URL is set (custom/dev platform handles its own notifications).
+    """
+    if os.environ.get("CLAUDEMON_CLOUD_URL"):
+        return
+    _notification_pool.submit(_send_native_notification, title, message, word, level)
 
 
 def notify_catch(word, result, stats):

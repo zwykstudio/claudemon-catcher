@@ -18,6 +18,7 @@ Setup:
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Add parent directory to path
@@ -84,6 +85,28 @@ TOOLS = [
 ]
 
 EVOLUTION_NAMES = {1: "LARVA", 20: "SPAWN", 40: "BEAST", 60: "APEX", 80: "OMEGA", 100: "???"}
+
+
+def _tail_lines(filepath: str, n: int) -> list[str]:
+    """Read the last n lines from a file efficiently by seeking from the end."""
+    with open(filepath, "rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+        if file_size == 0:
+            return []
+        buf = b""
+        pos = file_size
+        lines_found = 0
+        while pos > 0 and lines_found <= n:
+            chunk_size = min(4096, pos)
+            pos -= chunk_size
+            f.seek(pos)
+            chunk = f.read(chunk_size)
+            buf = chunk + buf
+            lines_found = buf.count(b"\n")
+        decoded = buf.decode("utf-8", errors="replace")
+        all_lines = decoded.splitlines()
+        return all_lines[-n:] if len(all_lines) > n else all_lines
 
 
 def format_creature(c: dict) -> str:
@@ -153,16 +176,13 @@ def handle_tool(name: str, args: dict) -> str:
         count = args.get("count", 10)
         if not os.path.exists(CATCHES_FILE):
             return "No catches yet."
-        with open(CATCHES_FILE, "r") as f:
-            lines = f.readlines()
-        recent = lines[-count:] if len(lines) > count else lines
+        recent = _tail_lines(CATCHES_FILE, count)
         if not recent:
             return "No catches yet."
         catches = []
         for line in reversed(recent):
             try:
                 c = json.loads(line.strip())
-                from datetime import datetime
                 ts = datetime.fromtimestamp(c["ts"]).strftime("%H:%M:%S")
                 catches.append(f"  {ts} - {c['word']}")
             except (json.JSONDecodeError, KeyError):

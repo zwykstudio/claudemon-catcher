@@ -6,7 +6,9 @@ using WAL mode and automatic retries.
 """
 
 import os
+import random
 import sqlite3
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -22,19 +24,39 @@ DB_TIMEOUT = 30.0  # Timeout for acquiring lock (seconds)
 MAX_RETRIES = 5    # Max retries on lock errors
 
 
-def get_connection():
-    """Return a DB connection with concurrency support."""
+_db_initialized = False
+_db_init_lock = threading.Lock()
+
+
+def _raw_connection():
+    """Return a raw DB connection (no init guard — used by init_db itself)."""
     os.makedirs(DB_PATH.parent, exist_ok=True)
     conn = sqlite3.connect(
         DB_PATH,
         detect_types=sqlite3.PARSE_DECLTYPES,
         timeout=DB_TIMEOUT,
-        isolation_level="DEFERRED"  # Better for concurrent reads
+        isolation_level="DEFERRED"
     )
-    # Enable WAL mode for better concurrency
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")  # 30s busy timeout
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
+
+
+def _ensure_initialized():
+    """Lazy init_db() — called once on first get_connection()."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _db_init_lock:
+        if not _db_initialized:
+            init_db()
+            _db_initialized = True
+
+
+def get_connection():
+    """Return a DB connection with concurrency support."""
+    _ensure_initialized()
+    return _raw_connection()
 
 
 def with_retry(func):
@@ -47,7 +69,8 @@ def with_retry(func):
             except sqlite3.OperationalError as e:
                 if "locked" in str(e).lower():
                     last_error = e
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    base_delay = 0.05 * (2 ** attempt)
+                    time.sleep(base_delay * (0.5 + random.random()))
                 else:
                     raise
         raise last_error
@@ -56,7 +79,7 @@ def with_retry(func):
 
 def init_db():
     """Initialize the database."""
-    with get_connection() as conn:
+    with _raw_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS claudemons (
                 word TEXT PRIMARY KEY,
@@ -291,6 +314,3 @@ def get_stats():
             "hatch_threshold": HATCH_THRESHOLD
         }
 
-
-# Init DB on import
-init_db()
