@@ -117,6 +117,10 @@ if ($ApiKey) {
             Write-Host "    ✗ Invalid key. It should start with sk_claudemon_"
             exit 1
         }
+        if ($InputKey -match '[^a-zA-Z0-9_-]') {
+            Write-Host "    ✗ Invalid key. Only alphanumeric characters, hyphens and underscores are allowed."
+            exit 1
+        }
         $ApiKey = $InputKey
         $EnvMode = "cloud"
         Write-Host "    ✓ API key set (cloud mode)"

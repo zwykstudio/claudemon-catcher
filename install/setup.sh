@@ -135,6 +135,10 @@ else
             echo "  ✗ Invalid key. It should start with sk_claudemon_"
             exit 1
         fi
+        if [[ "$INPUT_KEY" =~ [^a-zA-Z0-9_-] ]]; then
+            echo "  ✗ Invalid key. Only alphanumeric characters, hyphens and underscores are allowed."
+            exit 1
+        fi
         export CLAUDEMON_API_KEY="$INPUT_KEY"
         CLAUDEMON_ENV_MODE="cloud"
         echo "  ✓ API key set (cloud mode)"
@@ -238,7 +242,9 @@ else
 
     # Inject env vars (one Environment= line per var, after WorkingDirectory)
     echo "$ENV_VARS" | while IFS='=' read -r key value; do
-        sed -i "/^WorkingDirectory=/a Environment=$key=$value" "$SERVICE_DEST"
+        # Escape sed delimiter and quote value for systemd
+        escaped_value=$(printf '%s' "$value" | sed 's/[&/\]/\\&/g')
+        sed -i "/^WorkingDirectory=/a Environment=\"$key=$escaped_value\"" "$SERVICE_DEST"
     done
 
     systemctl --user daemon-reload
