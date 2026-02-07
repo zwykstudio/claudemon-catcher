@@ -17,6 +17,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,6 +27,7 @@ from engine.notifications import notify_catch
 
 # Configuration
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
+STATUSLINE_FILE = os.path.expanduser("~/.claudemon/statusline.json")
 POLL_INTERVAL = 0.5  # seconds
 
 
@@ -64,8 +66,34 @@ def watch_catches():
                 time.sleep(POLL_INTERVAL)
 
 
+def update_statusline(word: str, result, session_catches: int):
+    """Write last catch info to ~/.claudemon/statusline.json for the Claude Code statusline."""
+    try:
+        data = {
+            "word": word,
+            "is_new": result.is_new,
+            "level": result.new_level,
+            "evolved": result.evolved,
+            "just_hatched": result.just_hatched,
+            "is_egg": result.is_egg,
+            "session_catches": session_catches,
+            "ts": time.time(),
+        }
+        tmp = STATUSLINE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, STATUSLINE_FILE)
+    except Exception as e:
+        print(f"[engine] Statusline write error: {e}", file=sys.stderr)
+
+
+# Session-level catch counter
+_session_catches = 0
+
+
 def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None):
     """Process a caught word: update storage and send notifications."""
+    global _session_catches
     print(f"[engine] Catch: {word} (sid={sid}, duration={duration})")
 
     try:
@@ -74,8 +102,10 @@ def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: s
             print(f"[engine] Storage failed for {word}", file=sys.stderr)
             return
 
+        _session_catches += 1
         creature = storage.get_creature(word)
         notify_catch(word, result.__dict__, creature)
+        update_statusline(word, result, _session_catches)
 
     except Exception as e:
         print(f"[engine] Error processing {word}: {e}", file=sys.stderr)

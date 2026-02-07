@@ -236,6 +236,38 @@ Start-ScheduledTask -TaskName $TaskName
 Write-Host "    ✓ Engine daemon installed (Task Scheduler)"
 Write-Host ""
 
+# ── Claude Code statusline ──
+
+$StatuslineScript = Join-Path $ScriptDir "statusline.ps1"
+
+Write-Host "  → Claude Code statusline"
+
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if ($claudeCmd) {
+    Write-Host ""
+    Write-Host "    This adds a status bar in Claude Code showing your catches in real-time."
+    Write-Host "    Command: claude config set statusline `"powershell -NoProfile -File $StatuslineScript`""
+    Write-Host ""
+    $slConfirm = Read-Host "    Install statusline? [Y/n]"
+    if (-not $slConfirm) { $slConfirm = "Y" }
+    if ($slConfirm -match "^[Yy]") {
+        try {
+            & claude config set statusline "powershell -NoProfile -File $StatuslineScript" 2>$null
+            Write-Host "    ✓ Statusline configured"
+        } catch {
+            Write-Host "    ⚠ Failed — run manually:"
+            Write-Host "      claude config set statusline `"powershell -NoProfile -File $StatuslineScript`""
+        }
+    } else {
+        Write-Host "    ⚠ Skipped. To add later:"
+        Write-Host "      claude config set statusline `"powershell -NoProfile -File $StatuslineScript`""
+    }
+} else {
+    Write-Host "    ⚠ Claude CLI not found. To configure the statusline later:"
+    Write-Host "      claude config set statusline `"powershell -NoProfile -File $StatuslineScript`""
+}
+Write-Host ""
+
 # ── Done ──
 
 Write-Host "  ╔════════════════════════════════════════╗"

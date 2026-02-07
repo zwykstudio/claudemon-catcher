@@ -80,6 +80,20 @@ claude mcp add claudemon -- python3 /path/to/claudemon-catcher/mcp/server.py
 
 Tools: `claudemon_collection`, `claudemon_team`, `claudemon_creature`, `claudemon_recent`, `claudemon_stats`.
 
+## Statusline
+
+Shows catches in real-time in the Claude Code status bar (e.g. `♦ middleware — new egg! (5 caught)`).
+
+The setup script offers to configure it automatically, or manually:
+
+```bash
+# macOS / Linux
+claude config set statusline "bash /path/to/claudemon-catcher/install/statusline.sh"
+
+# Windows
+claude config set statusline "powershell -NoProfile -File C:\path\to\claudemon-catcher\install\statusline.ps1"
+```
+
 ## Tests
 
 ```bash

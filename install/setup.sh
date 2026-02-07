@@ -316,7 +316,32 @@ else
 fi
 echo ""
 
-# 6. Done
+# 6. Claude Code statusline
+STATUSLINE_SCRIPT="$SCRIPT_DIR/statusline.sh"
+
+echo "→ Claude Code statusline"
+if command -v claude &>/dev/null; then
+    echo ""
+    echo "  This adds a status bar in Claude Code showing your catches in real-time."
+    echo "  Command: claude config set statusline \"bash $STATUSLINE_SCRIPT\""
+    echo ""
+    read -rp "  Install statusline? [Y/n] " SL_CONFIRM
+    SL_CONFIRM="${SL_CONFIRM:-Y}"
+    if [[ "$SL_CONFIRM" =~ ^[Yy] ]]; then
+        claude config set statusline "bash $STATUSLINE_SCRIPT" 2>/dev/null && \
+            echo "  ✓ Statusline configured" || \
+            echo "  ⚠ Failed — run manually: claude config set statusline \"bash $STATUSLINE_SCRIPT\""
+    else
+        echo "  ⚠ Skipped. To add later:"
+        echo "    claude config set statusline \"bash $STATUSLINE_SCRIPT\""
+    fi
+else
+    echo "  ⚠ Claude CLI not found. To configure the statusline later:"
+    echo "    claude config set statusline \"bash $STATUSLINE_SCRIPT\""
+fi
+echo ""
+
+# 7. Done
 echo "╔════════════════════════════════════════╗"
 echo "║            SETUP COMPLETE              ║"
 echo "╚════════════════════════════════════════╝"
