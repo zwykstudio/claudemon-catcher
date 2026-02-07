@@ -97,6 +97,7 @@ class CloudStorage:
         ).rstrip("/")
         self.api_key = os.environ.get("CLAUDEMON_API_KEY", "")
         self.timeout = 5
+        self.last_error = None
 
     def _request(self, method: str, path: str, data: dict = None) -> Optional[dict]:
         """Make an authenticated API request."""
@@ -109,11 +110,13 @@ class CloudStorage:
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                self.last_error = None
                 return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            self.last_error = f"HTTP {e.code} on {method} {path}"
+            return None
         except (urllib.error.URLError, Exception) as e:
-            if os.environ.get("CLAUDEMON_DEBUG"):
-                import sys
-                print(f"[cloud] {method} {path}: {e}", file=sys.stderr)
+            self.last_error = f"{method} {path}: {e}"
             return None
 
     def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None) -> Optional[CatchResult]:

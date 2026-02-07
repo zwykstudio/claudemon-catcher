@@ -293,7 +293,91 @@ class TestGetStorage:
 
 
 # ===========================================================================
-# 4. MCP — formatting
+# 4. Wrapper — CLI dispatch
+# ===========================================================================
+
+class TestCliDispatch:
+    """_dispatch_cli() intercepts CLI flags before launching PTY."""
+
+    def test_dispatch_cli_intercepts_flags(self, monkeypatch):
+        w = _import_wrapper()
+        called = {}
+
+        def fake_cli_main():
+            called["yes"] = True
+
+        monkeypatch.setattr("cli.main.main", fake_cli_main)
+
+        for flag in ["--stats", "--list", "--dashboard", "-d", "--help", "-h"]:
+            called.clear()
+            monkeypatch.setattr("sys.argv", ["wrapper.py", flag])
+            assert w._dispatch_cli() is True
+            assert called.get("yes"), f"CLI main not called for {flag}"
+
+    def test_dispatch_cli_ignores_normal_args(self, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setattr("sys.argv", ["wrapper.py", "fix the auth bug"])
+        assert w._dispatch_cli() is False
+
+
+# ===========================================================================
+# 5. CLI — display and error handling
+# ===========================================================================
+
+class TestCliDisplay:
+    """CLI formatting and error handling."""
+
+    def test_show_list_cloud_failure_exits(self, monkeypatch, capsys):
+        """When cloud returns None, CLI shows error and exits."""
+        monkeypatch.setenv("NO_COLOR", "1")
+
+        from cli import commands
+
+        class FakeStorage:
+            def get_all(self):
+                return None
+        monkeypatch.setattr(commands, "_get_storage", lambda: FakeStorage())
+
+        with pytest.raises(SystemExit):
+            commands.show_list()
+        out = capsys.readouterr().out
+        assert "Could not reach" in out
+
+    def test_show_list_displays_creatures(self, monkeypatch, capsys):
+        """When storage has data, CLI displays hatched and eggs separately."""
+        monkeypatch.setenv("NO_COLOR", "1")
+
+        from cli import commands
+
+        class FakeStorage:
+            def get_all(self):
+                return [
+                    {"word": "Thinking", "level": 25, "times_caught": 10,
+                     "evolution_stage": 20, "is_egg": False, "in_team": True},
+                    {"word": "Reasoning", "level": 1, "times_caught": 1,
+                     "evolution_stage": 1, "is_egg": True, "in_team": False,
+                     "hatch_progress": 0.33},
+                ]
+        monkeypatch.setattr(commands, "_get_storage", lambda: FakeStorage())
+
+        commands.show_list()
+        out = capsys.readouterr().out
+        assert "COLLECTION" in out
+        assert "Thinking" in out
+        assert "EGGS" in out
+        assert "Reasoning" in out
+        assert "Total: 2" in out
+
+    def test_progress_bar(self, monkeypatch):
+        monkeypatch.setenv("NO_COLOR", "1")
+        from cli.commands import _progress_bar
+        bar = _progress_bar(0.5, width=8)
+        assert "=" in bar
+        assert "[" in bar
+
+
+# ===========================================================================
+# 6. MCP — formatting
 # ===========================================================================
 
 class TestFormatCreature:

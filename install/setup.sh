@@ -4,9 +4,9 @@
 #
 # This script:
 # 1. Checks prerequisites (Python, Claude CLI)
-# 2. Configures API key for cloud mode
-# 3. Sets up the engine daemon (launchd on macOS, systemd on Linux)
-# 4. Cleans up old server daemon if upgrading
+# 2. Configures API key or local mode
+# 3. Injects env vars into daemon + shell config
+# 4. Sets up the engine daemon (launchd on macOS, systemd on Linux)
 # 5. Adds alias to your shell config
 #
 
@@ -95,26 +95,73 @@ else
 fi
 echo ""
 
-# 2. Configuration
+# 2. Configuration — determine mode and collect env vars
+#    We build an associative list of env vars to inject everywhere.
 echo "→ Configuration..."
 
+CLAUDEMON_ENV_MODE=""   # "cloud" or "local"
+
 if [ -n "$CLAUDEMON_API_KEY" ]; then
-    echo "  ✓ CLAUDEMON_API_KEY is set (cloud mode)"
+    CLAUDEMON_ENV_MODE="cloud"
+    echo "  ✓ CLAUDEMON_API_KEY detected (cloud mode)"
 elif [ "$CLAUDEMON_MODE" = "local" ]; then
+    CLAUDEMON_ENV_MODE="local"
     echo "  ✓ CLAUDEMON_MODE=local (local mode)"
 else
-    echo "  ⚠ No API key found. Cloud mode requires CLAUDEMON_API_KEY."
+    # Interactive: ask the user
     echo ""
-    echo "  To get your key:"
-    echo "    1. Visit https://claudemon.zwyk-studio.com/dashboard/settings"
-    echo "    2. Copy your API key"
-    echo "    3. Add to your shell config:"
-    echo "       export CLAUDEMON_API_KEY=sk_claudemon_..."
+    echo "  No configuration found. Choose a mode:"
     echo ""
-    echo "  For local-only mode (no cloud sync):"
-    echo "    export CLAUDEMON_MODE=local"
+    echo "    1) Cloud (default) — sync to https://claudemon.zwyk-studio.com"
+    echo "    2) Local — SQLite only, no cloud sync"
     echo ""
+    read -rp "  Choice [1]: " MODE_CHOICE
+    MODE_CHOICE="${MODE_CHOICE:-1}"
+
+    if [ "$MODE_CHOICE" = "2" ]; then
+        CLAUDEMON_ENV_MODE="local"
+        export CLAUDEMON_MODE="local"
+        echo "  ✓ Local mode selected"
+    else
+        echo ""
+        echo "  Paste your API key (get one at https://claudemon.zwyk-studio.com/dashboard/settings):"
+        read -rp "  API key: " INPUT_KEY
+        INPUT_KEY="$(echo "$INPUT_KEY" | xargs)"  # trim whitespace
+        if [ -z "$INPUT_KEY" ]; then
+            echo "  ✗ No key provided. Re-run setup when you have your key."
+            exit 1
+        fi
+        if [[ "$INPUT_KEY" != sk_claudemon_* ]]; then
+            echo "  ✗ Invalid key. It should start with sk_claudemon_"
+            exit 1
+        fi
+        export CLAUDEMON_API_KEY="$INPUT_KEY"
+        CLAUDEMON_ENV_MODE="cloud"
+        echo "  ✓ API key set (cloud mode)"
+    fi
 fi
+
+# Collect env vars: NAME=VALUE pairs (one per line)
+ENV_VARS=""
+SHELL_EXPORTS=""
+
+if [ "$CLAUDEMON_ENV_MODE" = "cloud" ]; then
+    ENV_VARS="CLAUDEMON_API_KEY=$CLAUDEMON_API_KEY"
+    SHELL_EXPORTS="export CLAUDEMON_API_KEY='$CLAUDEMON_API_KEY'"
+else
+    ENV_VARS="CLAUDEMON_MODE=local"
+    SHELL_EXPORTS="export CLAUDEMON_MODE=local"
+fi
+
+# Include CLAUDEMON_CLOUD_URL if set (custom API endpoint)
+if [ -n "$CLAUDEMON_CLOUD_URL" ]; then
+    ENV_VARS="$ENV_VARS
+CLAUDEMON_CLOUD_URL=$CLAUDEMON_CLOUD_URL"
+    SHELL_EXPORTS="$SHELL_EXPORTS
+export CLAUDEMON_CLOUD_URL='$CLAUDEMON_CLOUD_URL'"
+    echo "  ✓ Custom cloud URL: $CLAUDEMON_CLOUD_URL"
+fi
+
 echo ""
 
 # 3. Cleanup old server daemon (for upgrades from previous versions)
@@ -143,12 +190,12 @@ else
 fi
 echo ""
 
-# 4. Install engine daemon
+# 4. Install engine daemon (with env vars injected)
 echo "→ Setting up engine daemon..."
 echo "  Using Python: $PYTHON_PATH"
 
 if [[ "$OS" == "macos" ]]; then
-    # ── macOS: launchd ──
+    # ── macOS: launchd + PlistBuddy for env vars ──
     ENGINE_PLIST_NAME="com.claudemon.engine"
     ENGINE_PLIST_SRC="$SCRIPT_DIR/$ENGINE_PLIST_NAME.plist"
     ENGINE_PLIST_DEST="$HOME/Library/LaunchAgents/$ENGINE_PLIST_NAME.plist"
@@ -159,7 +206,20 @@ if [[ "$OS" == "macos" ]]; then
         echo "  Stopping existing engine..."
         launchctl unload "$ENGINE_PLIST_DEST" 2>/dev/null || true
     fi
-    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" "$ENGINE_PLIST_SRC" > "$ENGINE_PLIST_DEST"
+
+    # Copy template with basic substitutions
+    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" \
+        -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" \
+        "$ENGINE_PLIST_SRC" > "$ENGINE_PLIST_DEST"
+
+    # Inject env vars with PlistBuddy (supports any number of vars)
+    PB=/usr/libexec/PlistBuddy
+    $PB -c "Add :EnvironmentVariables dict" "$ENGINE_PLIST_DEST" 2>/dev/null || true
+    echo "$ENV_VARS" | while IFS='=' read -r key value; do
+        $PB -c "Delete :EnvironmentVariables:$key" "$ENGINE_PLIST_DEST" 2>/dev/null || true
+        $PB -c "Add :EnvironmentVariables:$key string $value" "$ENGINE_PLIST_DEST"
+    done
+
     launchctl load "$ENGINE_PLIST_DEST"
     echo "  ✓ Engine daemon installed (launchd)"
 
@@ -167,35 +227,93 @@ else
     # ── Linux: systemd user service ──
     SYSTEMD_DIR="$HOME/.config/systemd/user"
     mkdir -p "$SYSTEMD_DIR"
+    SERVICE_DEST="$SYSTEMD_DIR/claudemon-engine.service"
 
     systemctl --user stop claudemon-engine 2>/dev/null || true
-    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" \
-        "$SCRIPT_DIR/claudemon-engine.service" > "$SYSTEMD_DIR/claudemon-engine.service"
+
+    # Copy template with basic substitutions
+    sed -e "s|__CLAUDEMON_DIR__|$BASE_DIR|g" \
+        -e "s|__PYTHON_PATH__|$PYTHON_PATH|g" \
+        "$SCRIPT_DIR/claudemon-engine.service" > "$SERVICE_DEST"
+
+    # Inject env vars (one Environment= line per var, after WorkingDirectory)
+    echo "$ENV_VARS" | while IFS='=' read -r key value; do
+        sed -i "/^WorkingDirectory=/a Environment=$key=$value" "$SERVICE_DEST"
+    done
+
     systemctl --user daemon-reload
     systemctl --user enable --now claudemon-engine
     echo "  ✓ Engine daemon installed (systemd)"
 fi
 echo ""
 
-# 5. Shell alias
+# 5. Shell configuration (alias + env vars)
 SHELL_RC=""
+SHELL_RC_PATH=""
 if [ -f "$HOME/.zshrc" ]; then
     SHELL_RC="~/.zshrc"
+    SHELL_RC_PATH="$HOME/.zshrc"
 elif [ -f "$HOME/.bashrc" ]; then
     SHELL_RC="~/.bashrc"
+    SHELL_RC_PATH="$HOME/.bashrc"
 else
     SHELL_RC="~/.bashrc"
+    SHELL_RC_PATH="$HOME/.bashrc"
 fi
 
-echo "→ Shell configuration"
-echo ""
-echo "  Add this alias to your shell config ($SHELL_RC):"
-echo ""
-echo "    alias cc='python3 $BASE_DIR/wrapper.py'"
-echo ""
-echo "  Or run this command:"
-echo ""
-echo "    echo \"alias cc='python3 $BASE_DIR/wrapper.py'\" >> $SHELL_RC"
+ALIAS_LINE="alias cc='python3 $BASE_DIR/wrapper.py'"
+
+# Check what's already in shell config
+NEED_ALIAS=true
+NEED_ENV=true
+if [ -f "$SHELL_RC_PATH" ]; then
+    grep -qF "alias cc=" "$SHELL_RC_PATH" 2>/dev/null && NEED_ALIAS=false
+    if [ "$CLAUDEMON_ENV_MODE" = "cloud" ]; then
+        grep -qF "CLAUDEMON_API_KEY" "$SHELL_RC_PATH" 2>/dev/null && NEED_ENV=false
+    else
+        grep -qF "CLAUDEMON_MODE" "$SHELL_RC_PATH" 2>/dev/null && NEED_ENV=false
+    fi
+fi
+
+LINES_TO_ADD=""
+if $NEED_ENV; then
+    LINES_TO_ADD="$SHELL_EXPORTS"
+fi
+if $NEED_ALIAS; then
+    if [ -n "$LINES_TO_ADD" ]; then
+        LINES_TO_ADD="$LINES_TO_ADD
+$ALIAS_LINE"
+    else
+        LINES_TO_ADD="$ALIAS_LINE"
+    fi
+fi
+
+echo "→ Shell configuration ($SHELL_RC)"
+
+if [ -z "$LINES_TO_ADD" ]; then
+    echo "  ✓ Already configured"
+else
+    echo ""
+    echo "  Adding to $SHELL_RC:"
+    echo ""
+    echo "$LINES_TO_ADD" | while IFS= read -r line; do
+        echo "    $line"
+    done
+    echo ""
+    read -rp "  OK? [Y/n] " CONFIRM
+    CONFIRM="${CONFIRM:-Y}"
+    if [[ "$CONFIRM" =~ ^[Yy] ]]; then
+        echo "" >> "$SHELL_RC_PATH"
+        echo "# Claudemon" >> "$SHELL_RC_PATH"
+        echo "$LINES_TO_ADD" >> "$SHELL_RC_PATH"
+        echo "  ✓ Added to $SHELL_RC"
+    else
+        echo "  ⚠ Skipped. Add manually:"
+        echo "$LINES_TO_ADD" | while IFS= read -r line; do
+            echo "    $line"
+        done
+    fi
+fi
 echo ""
 
 # 6. Done
@@ -206,6 +324,8 @@ echo ""
 echo "  Dashboard: https://claudemon.zwyk-studio.com/dashboard"
 echo "  CLI:       cc [args...]"
 echo "  Open:      cc --dashboard"
+echo ""
+echo "  Restart your terminal (or run: source $SHELL_RC)"
 echo ""
 if [[ "$OS" == "macos" ]]; then
     echo "  To stop the engine:"

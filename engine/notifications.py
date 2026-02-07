@@ -102,6 +102,26 @@ def _send_native_notification(title, message, word=None, level=None):
             subprocess.run(cmd, capture_output=True, timeout=2)
             return True
 
+        elif system == "Windows":
+            safe_title = f"Claudemon — {title}".replace("'", "''")
+            safe_msg = message.replace("'", "''")
+            ps = (
+                "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');"
+                "$n = New-Object System.Windows.Forms.NotifyIcon;"
+                "$n.Icon = [System.Drawing.SystemIcons]::Application;"
+                f"$n.BalloonTipTitle = '{safe_title}';"
+                f"$n.BalloonTipText = '{safe_msg}';"
+                "$n.Visible = $true;"
+                "$n.ShowBalloonTip(3000);"
+                "Start-Sleep 4;"
+                "$n.Dispose()"
+            )
+            subprocess.run(
+                ["powershell", "-WindowStyle", "Hidden", "-Command", ps],
+                capture_output=True, timeout=8,
+            )
+            return True
+
     except Exception:
         pass
 

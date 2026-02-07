@@ -242,8 +242,22 @@ def _main_windows() -> None:
     sys.exit(pty_proc.get_exitstatus() or 0)
 
 
+CLI_FLAGS = {"--stats", "--list", "--dashboard", "-d", "--help", "-h"}
+
+
+def _dispatch_cli():
+    """Check if argv contains a CLI flag; if so, delegate to cli.main."""
+    if any(arg in CLI_FLAGS for arg in sys.argv[1:]):
+        from cli.main import main as cli_main
+        cli_main()
+        return True
+    return False
+
+
 if __name__ == "__main__":
-    if platform.system() == "Windows":
+    if _dispatch_cli():
+        pass
+    elif platform.system() == "Windows":
         _main_windows()
     else:
         _main_posix()
