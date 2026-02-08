@@ -30,6 +30,9 @@ CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 STATUSLINE_FILE = os.path.expanduser("~/.claudemon/statusline.json")
 POSITION_FILE = os.path.expanduser("~/.claudemon/engine.pos")
 POLL_INTERVAL = 0.5  # seconds
+HEALTH_FILE = os.path.expanduser("~/.claudemon/engine.status")
+_last_sync_ts: dict[str, float] = {}  # per-session last sync timestamp
+SYNC_COOLDOWN = 3.5  # seconds between API calls per session
 
 
 def _load_position(default: int) -> int:
@@ -80,11 +83,19 @@ def watch_catches():
             if line:
                 try:
                     catch = json.loads(line.strip())
+                    sid = catch.get("sid")
+                    # Throttle: wait if we synced this session too recently
+                    if sid:
+                        elapsed = time.time() - _last_sync_ts.get(sid, 0)
+                        if elapsed < SYNC_COOLDOWN:
+                            time.sleep(SYNC_COOLDOWN - elapsed)
                     handle_catch(
                         storage, catch["word"],
-                        ts=catch.get("ts"), proof=catch.get("proof"), sid=catch.get("sid"),
+                        ts=catch.get("ts"), proof=catch.get("proof"), sid=sid,
                         duration=catch.get("duration"),
                     )
+                    if sid:
+                        _last_sync_ts[sid] = time.time()
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"[engine] Invalid catch line: {e}", file=sys.stderr)
                 _save_position(f.tell())
@@ -92,34 +103,84 @@ def watch_catches():
                 time.sleep(POLL_INTERVAL)
 
 
-def update_statusline(word: str, result, session_catches: int):
-    """Write last catch info to ~/.claudemon/statusline.json for the Claude Code statusline."""
+_session_count_map: dict[str, int] = {}
+_session_xp_map: dict[str, int] = {}
+_session_duration_map: dict[str, float] = {}
+_session_catches_list: dict[str, list] = {}
+
+
+def update_statusline(word: str, result, sid: str, duration: float = None):
+    """Write last catch + session totals to ~/.claudemon/statusline-{sid}.json."""
     try:
+        event = None
+        if result.is_new:
+            event = "new"
+        elif result.just_hatched:
+            event = "hatched"
+        elif result.evolved:
+            event = "evolved"
+
+        dur = round(duration, 1) if duration else 0
+
+        count = _session_count_map.get(sid, 0) + 1
+        _session_count_map[sid] = count
+        total_xp = _session_xp_map.get(sid, 0) + result.xp_earned
+        _session_xp_map[sid] = total_xp
+        total_dur = _session_duration_map.get(sid, 0) + (duration or 0)
+        _session_duration_map[sid] = total_dur
+
+        catches = _session_catches_list.setdefault(sid, [])
+        catches.append({"word": word, "xp": result.xp_earned, "duration": dur, "event": event})
+
+        statusline_file = os.path.join(os.path.dirname(STATUSLINE_FILE), f"statusline-{sid}.json")
         data = {
             "word": word,
-            "is_new": result.is_new,
             "level": result.new_level,
-            "evolved": result.evolved,
-            "just_hatched": result.just_hatched,
-            "is_egg": result.is_egg,
-            "session_catches": session_catches,
+            "event": event,
+            "xp": result.xp_earned,
+            "duration": dur,
+            "count": count,
+            "total_xp": total_xp,
+            "total_duration": round(total_dur, 1),
+            "catches": catches,
             "ts": time.time(),
         }
-        tmp = STATUSLINE_FILE + ".tmp"
+        tmp = statusline_file + ".tmp"
         with open(tmp, "w") as f:
             json.dump(data, f)
-        os.replace(tmp, STATUSLINE_FILE)
+        os.replace(tmp, statusline_file)
+
+        # Cleanup old session files (>1h)
+        sl_dir = os.path.dirname(STATUSLINE_FILE)
+        now = time.time()
+        for fname in os.listdir(sl_dir):
+            if fname.startswith("statusline-") and fname.endswith(".json"):
+                fpath = os.path.join(sl_dir, fname)
+                if now - os.path.getmtime(fpath) > 3600:
+                    try:
+                        os.remove(fpath)
+                    except OSError:
+                        pass
     except Exception as e:
         print(f"[engine] Statusline write error: {e}", file=sys.stderr)
 
 
-# Session-level catch counter
-_session_catches = 0
+def _write_health(status: str, error: str = None):
+    """Write engine health to ~/.claudemon/engine.status."""
+    try:
+        data = {"status": status, "ts": time.time()}
+        if error:
+            data["error"] = error
+        tmp = HEALTH_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, HEALTH_FILE)
+    except Exception:
+        pass
 
 
 def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None):
     """Process a caught word: update storage and send notifications."""
-    global _session_catches
     print(f"[engine] Catch: {word} (sid={sid}, duration={duration})")
 
     try:
@@ -127,9 +188,9 @@ def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: s
         if result is None:
             err = getattr(storage, 'last_error', 'unknown')
             print(f"[engine] Storage failed for {word}: {err}", file=sys.stderr)
+            _write_health("error", err)
             return
 
-        _session_catches += 1
         flags = []
         if result.is_new: flags.append("NEW")
         if result.just_hatched: flags.append("HATCHED")
@@ -137,9 +198,18 @@ def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: s
         tag = f" [{', '.join(flags)}]" if flags else ""
         print(f"[engine] Synced: {word} lvl={result.new_level}{tag}")
 
-        creature = storage.get_creature(word)
-        notify_catch(word, result.__dict__, creature)
-        update_statusline(word, result, _session_catches)
+        _write_health("ok")
+
+        # Update statusline FIRST (instant, local file write)
+        if sid:
+            update_statusline(word, result, sid, duration=duration)
+
+        # Then do slower operations (extra API call + notifications)
+        try:
+            creature = storage.get_creature(word)
+            notify_catch(word, result.__dict__, creature)
+        except Exception as e:
+            print(f"[engine] Notification error for {word}: {e}", file=sys.stderr)
 
     except Exception as e:
         print(f"[engine] Error processing {word}: {e}", file=sys.stderr)

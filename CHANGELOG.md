@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to Claudemon Catcher are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
+
+## [0.2.0] - 2026-02-08
+
+### Added
+- Statusline polling: script waits up to 8s for engine sync instead of returning stale data
+- Periodic live file refresh during long captures (every ~5s) to prevent staleness
+- Engine health reporting in statusline (shows errors from `engine.status`)
+- Debug logging for statusline (`CLAUDEMON_DEBUG=1`)
+- Session recap on close (`print_recap()`)
+- Notification pooling in engine
+- API key validity check on startup
+
+### Changed
+- Split test suite from single 1687-line file into 8 focused modules (106 tests)
+- Statusline rewritten: read live/engine files, poll for sync, fallback gracefully
+- Recap output left-aligned (removed indentation)
+
+### Fixed
+- Statusline desync on long captures (>60s) due to stale live file timestamps
+- Statusline stuck showing old data when Claude Code only polls once per response
+
+## [0.1.0] - 2026-01-28
+
+### Added
+- Initial release: wrapper, engine daemon, CLI
+- Word detection from Claude Code output via regex
+- Engine watches `catches.jsonl`, syncs to platform via API
+- SQLite local database with game logic (XP, levels, evolution)
+- CloudStorage sync with retry and exponential backoff
+- Statusline integration for Claude Code
+- Cross-platform setup (macOS, Linux, Windows)

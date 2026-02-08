@@ -11,6 +11,7 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, sys, time, uuid
 
+VERSION = "0.2.0"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 DEBUG = os.environ.get("CLAUDEMON_DEBUG", "") == "1"
 DEBUG_LOG = os.path.expanduser("~/.claudemon/debug.log") if DEBUG else None
@@ -45,11 +46,32 @@ def dbg(msg: str) -> None:
     _debug_f.flush()
 
 
+# Session catch log (wrapper-side, independent of engine)
+_session_catches: list[dict] = []
+STATUSLINE_LIVE_DIR = os.path.expanduser("~/.claudemon")
+
+
+def _write_live_status(sid: str, data: dict):
+    """Write live capture status for the statusline (wrapper → statusline.sh)."""
+    try:
+        data["ts"] = time.time()
+        live_file = os.path.join(STATUSLINE_LIVE_DIR, f"statusline-{sid}-live.json")
+        tmp = live_file + ".tmp"
+        os.makedirs(STATUSLINE_LIVE_DIR, exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, live_file)
+    except Exception:
+        pass
+
+
 def emit(word: str, ts: float, proof: str, sid: str, duration: float = None) -> None:
     os.makedirs(os.path.dirname(CATCHES_FILE), exist_ok=True)
-    entry = {"word": word, "ts": ts, "duration": round(duration, 3) if duration is not None else 0.0, "proof": proof, "sid": sid}
+    dur = round(duration, 3) if duration is not None else 0.0
+    entry = {"word": word, "ts": ts, "duration": dur, "proof": proof, "sid": sid}
     with open(CATCHES_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
+    _session_catches.append({"word": word, "duration": round(dur, 1)})
 
 
 def flush_pending(pending: dict, sid: str, force: bool = False) -> None:
@@ -57,10 +79,16 @@ def flush_pending(pending: dict, sid: str, force: bool = False) -> None:
     if not pending:
         return
     if not force and time.time() - pending.get("last_seen", pending["ts"]) <= SPINNER_IDLE_TIMEOUT:
+        # Still capturing — refresh live file every ~5s so statusline.sh ts stays fresh
+        if time.time() - pending.get("_live_refresh", 0) > 5:
+            _write_live_status(sid, {"phase": "capturing", "word": pending["word"], "start": pending["ts"]})
+            pending["_live_refresh"] = time.time()
         return
+    word = pending["word"]
     duration = time.time() - pending["ts"]
-    emit(pending["word"], pending["ts"], pending["proof"], sid, duration=duration)
-    dbg(f"  >>> FLUSHED: {pending['word']} (duration={duration:.3f}s)")
+    emit(word, pending["ts"], pending["proof"], sid, duration=duration)
+    _write_live_status(sid, {"phase": "syncing", "word": word, "duration": round(duration, 1)})
+    dbg(f"  >>> FLUSHED: {word} (duration={duration:.3f}s)")
     pending.clear()
 
 
@@ -91,6 +119,7 @@ def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, 
         pending.clear()
         pending.update({"word": word, "ts": ts, "proof": proof, "last_seen": ts})
         seen.add(word)
+        _write_live_status(sid, {"phase": "capturing", "word": word, "start": ts})
         dbg(f"  >>> WORD FOUND (pending): {word} (proof={proof[:8]}… sid={sid})")
 
         idx = buf.find("…")
@@ -100,6 +129,169 @@ def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, 
         dbg(f"  --- {'ALREADY SEEN: ' + word if word and word in seen else 'NO MATCH'}")
 
     return buf
+
+
+def _check_statusline() -> bool:
+    """Return True if claudemon statusline is configured in Claude Code."""
+    try:
+        with open(os.path.expanduser("~/.claude/settings.json")) as f:
+            cfg = json.load(f)
+        sl = cfg.get("statusLine", {})
+        cmd = sl.get("command", "") if isinstance(sl, dict) else str(sl)
+        return "claudemon" in cmd.lower() or "statusline.sh" in cmd
+    except Exception:
+        return False
+
+
+def _check_api_key() -> tuple[str, str]:
+    """Check API key / mode config. Returns (status, detail)."""
+    mode = os.environ.get("CLAUDEMON_MODE", "").lower().strip()
+    api_key = os.environ.get("CLAUDEMON_API_KEY", "").strip()
+
+    if mode == "local":
+        return ("local", "local mode")
+    if api_key and api_key.startswith("sk_claudemon_"):
+        return ("cloud", "cloud sync")
+    if api_key:
+        return ("error", "invalid API key format")
+    return ("error", "no API key set")
+
+
+def print_banner() -> None:
+    """Print a single-line startup banner before launching Claude."""
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+
+    status, detail = _check_api_key()
+    if status == "error":
+        status_str = f"{RED}✗ {detail}{RESET}"
+    elif status == "local":
+        status_str = f"{YELLOW}● {detail}{RESET}"
+    else:
+        status_str = f"{GREEN}✓ {detail}{RESET}"
+
+    MAGENTA = "\033[35m"
+    BOLD = "\033[1m"
+
+    line = f"{BOLD}{MAGENTA}claudemon{RESET} {CYAN}v{VERSION}{RESET} — {status_str}"
+    print(line, file=sys.stderr)
+
+    if status == "error" and not os.environ.get("CLAUDEMON_MODE", "").strip():
+        print(f"  {DIM}set CLAUDEMON_API_KEY or CLAUDEMON_MODE=local{RESET}", file=sys.stderr)
+
+    if not _check_statusline():
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.sh")
+        print(
+            f"  {DIM}tip: add claudemon to your statusline:{RESET} "
+            f"{DIM}cc --install-statusline{RESET}",
+            file=sys.stderr,
+        )
+
+    print(file=sys.stderr)
+
+
+import random
+
+RECAP_MESSAGES = [
+    "Keep catching 'em all!",
+    "Another productive session!",
+    "Your claudemons grow stronger.",
+    "The wild words never saw it coming.",
+    "Gotta catch 'em all!",
+    "You're on fire, trainer!",
+    "Those words didn't stand a chance.",
+    "Your collection grows...",
+]
+
+def print_recap(sid: str, seen: set, start_time: float) -> None:
+    """Print a session recap after Claude exits."""
+    if not seen:
+        return
+
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    MAGENTA = "\033[35m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+
+    # Use wrapper-side catch log as base (always available)
+    local_catches = list(_session_catches)
+    total_dur = sum(c["duration"] for c in local_catches)
+
+    # Try to enrich with engine data (XP, events) — best effort
+    sl_file = os.path.join(STATUSLINE_LIVE_DIR, f"statusline-{sid}.json")
+    engine_data = {}
+    total_xp = 0
+    try:
+        for _ in range(4):
+            try:
+                with open(sl_file) as f:
+                    sl_data = json.load(f)
+                total_xp = sl_data.get("total_xp", 0)
+                for c in sl_data.get("catches", []):
+                    engine_data[c["word"]] = c
+                if len(engine_data) >= len(local_catches):
+                    break
+            except (OSError, json.JSONDecodeError):
+                pass
+            time.sleep(0.3)
+    except KeyboardInterrupt:
+        pass
+
+    elapsed = time.time() - start_time
+    elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s" if elapsed >= 60 else f"{elapsed:.0f}s"
+
+    out = sys.stderr
+    print(file=out)
+    print(f"{BOLD}{MAGENTA}claudemon{RESET} {DIM}session recap{RESET}", file=out)
+    print(f"{DIM}{'─' * 38}{RESET}", file=out)
+
+    for c in local_catches:
+        word = c["word"]
+        dur = c["duration"]
+        # Merge engine data if available
+        eng = engine_data.get(word, {})
+        xp = eng.get("xp", 0)
+        event = eng.get("event")
+
+        xp_str = f"+{xp}xp" if xp else ""
+        dur_str = f"{dur}s" if dur else ""
+        event_str = ""
+        if event == "new":
+            event_str = f"{GREEN}NEW{RESET}"
+        elif event == "evolved":
+            event_str = f"{MAGENTA}EVOLVED{RESET}"
+        elif event == "hatched":
+            event_str = f"{YELLOW}HATCHED{RESET}"
+
+        parts = [f"{word:<22s}"]
+        if xp_str:
+            parts.append(f"{DIM}{xp_str:>7s}{RESET}")
+        if dur_str:
+            parts.append(f"{DIM}{dur_str:>6s}{RESET}")
+        if event_str:
+            parts.append(f" {event_str}")
+        print("".join(parts), file=out)
+
+    print(f"{DIM}{'─' * 38}{RESET}", file=out)
+
+    summary_parts = [f"{BOLD}{len(local_catches)}{RESET} caught"]
+    if total_xp:
+        summary_parts.append(f"{CYAN}{total_xp}xp{RESET}")
+    if total_dur:
+        dur_fmt = f"{total_dur:.1f}s"
+        summary_parts.append(f"{DIM}{dur_fmt}{RESET}")
+    summary_parts.append(f"{DIM}session {elapsed_str}{RESET}")
+
+    print(f"{' · '.join(summary_parts)}", file=out)
+    print(f"{DIM}{random.choice(RECAP_MESSAGES)}{RESET}", file=out)
+    print(file=out)
 
 
 def find_claude() -> str:
@@ -114,6 +306,11 @@ def _main_posix() -> None:
     import fcntl, pty, select, termios, tty
 
     claude = find_claude()
+    print_banner()
+
+    sid = uuid.uuid4().hex[:12]
+    os.environ["CLAUDEMON_SID"] = sid
+
     master, slave = pty.openpty()
     fcntl.fcntl(master, fcntl.F_SETFL, fcntl.fcntl(master, fcntl.F_GETFL) | os.O_NONBLOCK)
 
@@ -135,8 +332,8 @@ def _main_posix() -> None:
 
     os.close(slave)
     buf, seen, pending = "", set(), {}
-    sid = uuid.uuid4().hex[:12]
     session_hash = hashlib.sha256()
+    start_time = time.time()
     dbg(f"Session ID: {sid}")
 
     try:
@@ -184,9 +381,11 @@ def _main_posix() -> None:
             termios.tcsetattr(sys.stdin, termios.TCSAFLUSH, old_tty)
         os.close(master)
 
+    flush_pending(pending, sid, force=True)
     dbg(f"Session ended. Caught {len(seen)} words: {seen}")
     if _debug_f:
         _debug_f.close()
+    print_recap(sid, seen, start_time)
     try:
         _, status = os.waitpid(pid, 0)
         sys.exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
@@ -204,6 +403,11 @@ def _main_windows() -> None:
         sys.exit(1)
 
     claude = find_claude()
+    print_banner()
+
+    sid = uuid.uuid4().hex[:12]
+    os.environ["CLAUDEMON_SID"] = sid
+
     args = sys.argv[1:]
     cmd = claude + (" " + " ".join(args) if args else "")
 
@@ -216,8 +420,8 @@ def _main_windows() -> None:
     pty_proc.spawn(cmd)
 
     buf, seen, pending = "", set(), {}
-    sid = uuid.uuid4().hex[:12]
     session_hash = hashlib.sha256()
+    start_time = time.time()
     dbg(f"Session ID: {sid}")
 
     def stdin_reader():
@@ -246,18 +450,51 @@ def _main_windows() -> None:
             sys.stdout.write(data_str)
             sys.stdout.flush()
     finally:
+        flush_pending(pending, sid, force=True)
         dbg(f"Session ended. Caught {len(seen)} words: {seen}")
         if _debug_f:
             _debug_f.close()
 
+    print_recap(sid, seen, start_time)
     sys.exit(pty_proc.get_exitstatus() or 0)
 
 
 CLI_FLAGS = {"--stats", "--list", "--dashboard", "-d", "--help", "-h"}
 
+SETTINGS_FILE = os.path.expanduser("~/.claude/settings.json")
+
+
+def _install_statusline() -> None:
+    """Install claudemon statusline into Claude Code settings.json."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.sh")
+    if not os.path.isfile(script):
+        print(f"Error: statusline script not found at {script}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        with open(SETTINGS_FILE) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        cfg = {}
+    except json.JSONDecodeError:
+        print(f"Error: {SETTINGS_FILE} is not valid JSON", file=sys.stderr)
+        sys.exit(1)
+
+    cfg["statusLine"] = {"type": "command", "command": f"bash {script}"}
+
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+
+    print(f"\033[32m✓\033[0m claudemon statusline installed")
+
 
 def _dispatch_cli():
     """Check if argv contains a CLI flag; if so, delegate to cli.main."""
+    if "--install-statusline" in sys.argv[1:]:
+        _install_statusline()
+        return True
     if any(arg in CLI_FLAGS for arg in sys.argv[1:]):
         from cli.main import main as cli_main
         cli_main()
