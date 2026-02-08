@@ -1,5 +1,5 @@
 """
-tests/test_statusline.py - Tests for statusline.sh bash script.
+tests/test_statusline.py - Tests for statusline.py bash script.
 
 The script polls for engine sync (up to 8s) before falling back to capturing.
 Tests that provide matching engine data return instantly. Tests for the
@@ -9,9 +9,10 @@ capturing fallback are slower.
 import json
 import os
 import subprocess
+import sys
 import time
 
-from helpers import STATUSLINE_SH, _run_statusline
+from helpers import STATUSLINE_PY, _run_statusline
 
 
 # ===========================================================================
@@ -19,7 +20,7 @@ from helpers import STATUSLINE_SH, _run_statusline
 # ===========================================================================
 
 class TestStatuslineSynced:
-    """statusline.sh shows synced result with XP, events, counts."""
+    """statusline.py shows synced result with XP, events, counts."""
 
     def test_shows_full_result(self, tmp_path):
         sl_dir = tmp_path / ".claudemon"
@@ -119,7 +120,7 @@ class TestStatuslineSynced:
 # ===========================================================================
 
 class TestStatuslineEngineHealth:
-    """statusline.sh shows engine errors in statusline."""
+    """statusline.py shows engine errors in statusline."""
 
     def test_shows_recent_error(self, tmp_path):
         sl_dir = tmp_path / ".claudemon"
@@ -171,7 +172,7 @@ class TestStatuslineEdgeCases:
         env.pop("CLAUDEMON_SID", None)
         stdin_data = json.dumps({"model": {"display_name": "Opus"}, "context_window": {"used_percentage": 25.3}})
         result = subprocess.run(
-            ["bash", STATUSLINE_SH],
+            [sys.executable, STATUSLINE_PY],
             input=stdin_data, capture_output=True, text=True,
             env=env, timeout=5,
         )

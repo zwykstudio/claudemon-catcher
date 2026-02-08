@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-STATUSLINE_SH = os.path.join(ROOT, "install", "statusline.sh")
+STATUSLINE_PY = os.path.join(ROOT, "install", "statusline.py")
 
 
 def _import_wrapper():
@@ -35,7 +35,7 @@ def _import_database(tmp_path):
 
 def _run_statusline(tmp_dir, sid, live_data=None, engine_data=None,
                     health_data=None, stdin_json=None):
-    """Helper to run statusline.sh with controlled files and env."""
+    """Helper to run statusline.py with controlled files and env."""
     import subprocess
 
     sl_dir = str(tmp_dir)
@@ -58,7 +58,7 @@ def _run_statusline(tmp_dir, sid, live_data=None, engine_data=None,
     stdin_data = json.dumps(stdin_json or {"model": {"display_name": "Opus"}})
 
     result = subprocess.run(
-        ["bash", STATUSLINE_SH],
+        [sys.executable, STATUSLINE_PY],
         input=stdin_data, capture_output=True, text=True,
         env=env, timeout=15,
     )

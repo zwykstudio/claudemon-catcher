@@ -52,7 +52,7 @@ STATUSLINE_LIVE_DIR = os.path.expanduser("~/.claudemon")
 
 
 def _write_live_status(sid: str, data: dict):
-    """Write live capture status for the statusline (wrapper → statusline.sh)."""
+    """Write live capture status for the statusline (wrapper → statusline.py)."""
     try:
         data["ts"] = time.time()
         live_file = os.path.join(STATUSLINE_LIVE_DIR, f"statusline-{sid}-live.json")
@@ -79,7 +79,7 @@ def flush_pending(pending: dict, sid: str, force: bool = False) -> None:
     if not pending:
         return
     if not force and time.time() - pending.get("last_seen", pending["ts"]) <= SPINNER_IDLE_TIMEOUT:
-        # Still capturing — refresh live file every ~5s so statusline.sh ts stays fresh
+        # Still capturing — refresh live file every ~5s so statusline.py ts stays fresh
         if time.time() - pending.get("_live_refresh", 0) > 5:
             _write_live_status(sid, {"phase": "capturing", "word": pending["word"], "start": pending["ts"]})
             pending["_live_refresh"] = time.time()
@@ -138,7 +138,7 @@ def _check_statusline() -> bool:
             cfg = json.load(f)
         sl = cfg.get("statusLine", {})
         cmd = sl.get("command", "") if isinstance(sl, dict) else str(sl)
-        return "claudemon" in cmd.lower() or "statusline.sh" in cmd
+        return "claudemon" in cmd.lower() or "statusline." in cmd
     except Exception:
         return False
 
@@ -184,7 +184,7 @@ def print_banner() -> None:
         print(f"  {DIM}set CLAUDEMON_API_KEY or CLAUDEMON_MODE=local{RESET}", file=sys.stderr)
 
     if not _check_statusline():
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.sh")
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.py")
         print(
             f"  {DIM}tip: add claudemon to your statusline:{RESET} "
             f"{DIM}cc --install-statusline{RESET}",
@@ -466,7 +466,7 @@ SETTINGS_FILE = os.path.expanduser("~/.claude/settings.json")
 
 def _install_statusline() -> None:
     """Install claudemon statusline into Claude Code settings.json."""
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.sh")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.py")
     if not os.path.isfile(script):
         print(f"Error: statusline script not found at {script}", file=sys.stderr)
         sys.exit(1)
@@ -480,7 +480,7 @@ def _install_statusline() -> None:
         print(f"Error: {SETTINGS_FILE} is not valid JSON", file=sys.stderr)
         sys.exit(1)
 
-    cfg["statusLine"] = {"type": "command", "command": f"bash {script}"}
+    cfg["statusLine"] = {"type": "command", "command": f"python3 {script}"}
 
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     with open(SETTINGS_FILE, "w") as f:

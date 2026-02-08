@@ -114,7 +114,7 @@ class TestFlushPending:
         assert entry["word"] == "Thinking"
 
     def test_refreshes_live_file_during_long_capture(self, tmp_path):
-        """Live file ts is refreshed periodically so statusline.sh doesn't time out."""
+        """Live file ts is refreshed periodically so statusline.py doesn't time out."""
         w = _import_wrapper()
         w.STATUSLINE_LIVE_DIR = str(tmp_path)
         w.CATCHES_FILE = str(tmp_path / "catches.jsonl")
@@ -191,7 +191,7 @@ class TestEmit:
 # ===========================================================================
 
 class TestWriteLiveStatus:
-    """_write_live_status() writes live capture state for statusline.sh."""
+    """_write_live_status() writes live capture state for statusline.py."""
 
     def test_writes_live_file_with_timestamp(self, tmp_path):
         w = _import_wrapper()
@@ -349,7 +349,7 @@ class TestCheckStatusline:
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({
-            "statusLine": {"command": "bash /path/to/statusline.sh"}
+            "statusLine": {"command": "python3 /path/to/statusline.py"}
         }))
         monkeypatch.setattr(os.path, "expanduser", lambda p: str(settings) if "~" in p else p)
         assert w._check_statusline() is True
@@ -382,7 +382,7 @@ class TestInstallStatusline:
         data = json.loads((tmp_path / "settings.json").read_text())
         assert "statusLine" in data
         assert data["statusLine"]["type"] == "command"
-        assert "statusline.sh" in data["statusLine"]["command"]
+        assert "statusline.py" in data["statusLine"]["command"]
 
     def test_preserves_existing_settings(self, tmp_path, monkeypatch):
         w = _import_wrapper()
