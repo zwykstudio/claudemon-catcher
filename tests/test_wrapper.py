@@ -416,6 +416,7 @@ class TestPrintBanner:
         w = _import_wrapper()
         monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
         monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("current", ""))
         w.print_banner()
         err = capsys.readouterr().err
         assert w.VERSION in err
@@ -426,6 +427,7 @@ class TestPrintBanner:
         monkeypatch.delenv("CLAUDEMON_API_KEY", raising=False)
         monkeypatch.delenv("CLAUDEMON_MODE", raising=False)
         monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("error", ""))
         w.print_banner()
         err = capsys.readouterr().err
         assert "no API key" in err or "✗" in err
@@ -434,9 +436,257 @@ class TestPrintBanner:
         w = _import_wrapper()
         monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
         monkeypatch.setattr(w, "_check_statusline", lambda: False)
+        monkeypatch.setattr(w, "_check_update", lambda: ("current", ""))
         w.print_banner()
         err = capsys.readouterr().err
         assert "install-statusline" in err
+
+
+# ===========================================================================
+# Version update check
+# ===========================================================================
+
+class TestCheckUpdate:
+    """_check_update() compares local HEAD with remote HEAD."""
+
+    def test_returns_current_when_up_to_date(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = "abc123\n"
+            if cmd[1] == "rev-parse":
+                return R()
+            if cmd[1] == "ls-remote":
+                R.stdout = "abc123\tHEAD\n"
+                return R()
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "current"
+        assert msg == ""
+
+    def test_returns_behind_when_outdated(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = ""
+            if cmd[1] == "rev-parse":
+                R.stdout = "aaa111\n"
+            elif cmd[1] == "ls-remote":
+                R.stdout = "bbb222\tHEAD\n"
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "behind"
+        assert "update available" in msg
+        assert "cc update" in msg
+
+    def test_uses_fresh_cache(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        # Write a fresh cache that says update available
+        import json as _json
+        with open(cache_file, "w") as f:
+            _json.dump({"ts": time.time(), "local": "aaa111", "remote": "bbb222"}, f)
+
+        call_count = [0]
+        def fake_run(cmd, **kw):
+            call_count[0] += 1
+            class R:
+                returncode = 0
+                stdout = "aaa111\n"
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "behind"
+        assert "update available" in msg
+        # Only rev-parse should be called (to verify local), not ls-remote
+        assert call_count[0] == 1
+
+    def test_skips_stale_cache(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        # Write an expired cache
+        import json as _json
+        with open(cache_file, "w") as f:
+            _json.dump({"ts": time.time() - 90000, "local": "aaa111", "remote": "aaa111"}, f)
+
+        call_count = [0]
+        def fake_run(cmd, **kw):
+            call_count[0] += 1
+            class R:
+                returncode = 0
+                stdout = "aaa111\n" if cmd[1] == "rev-parse" else "bbb222\tHEAD\n"
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "behind"
+        assert "update available" in msg
+        # Both rev-parse and ls-remote should be called
+        assert call_count[0] == 2
+
+    def test_returns_error_on_failure(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            raise OSError("network down")
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "error"
+        assert msg == ""
+
+    def test_returns_error_on_timeout(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            raise w.subprocess.TimeoutExpired(cmd, 3)
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "error"
+        assert msg == ""
+
+    def test_writes_cache_atomically(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = "abc123\n" if cmd[1] == "rev-parse" else "abc123\tHEAD\n"
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        w._check_update()
+
+        # Cache file written, no tmp file left
+        assert os.path.exists(cache_file)
+        assert not os.path.exists(cache_file + ".tmp")
+        import json as _json
+        with open(cache_file) as f:
+            data = _json.load(f)
+        assert data["local"] == "abc123"
+        assert data["remote"] == "abc123"
+
+
+class TestBannerShowsUpdate:
+    """print_banner() shows update status inline and detail line."""
+
+    def test_shows_update_in_banner(self, capsys, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
+        monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("behind", "update available — run: cc update"))
+        w.print_banner()
+        err = capsys.readouterr().err
+        assert "update available" in err
+        assert "↑" in err
+        assert "◆" in err
+
+    def test_shows_up_to_date(self, capsys, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
+        monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("current", ""))
+        w.print_banner()
+        err = capsys.readouterr().err
+        assert "up to date" in err
+        assert "update available" not in err
+
+    def test_no_suffix_on_error(self, capsys, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
+        monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("error", ""))
+        w.print_banner()
+        err = capsys.readouterr().err
+        assert "up to date" not in err
+        assert "update available" not in err
+
+
+# ===========================================================================
+# cc update command
+# ===========================================================================
+
+class TestCmdUpdate:
+    """_cmd_update() pulls code and restarts engine."""
+
+    def test_pulls_and_restarts(self, capsys, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", str(tmp_path / "version.check"))
+
+        calls = []
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            class R:
+                returncode = 0
+                stdout = "Already up to date.\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        monkeypatch.setattr("cli.engine_commands._restart", lambda: True)
+        monkeypatch.setattr("cli.engine_commands._is_running", lambda: True)
+
+        w._cmd_update()
+
+        err = capsys.readouterr().err
+        assert "Already up to date" in err
+        assert "Engine restarted" in err
+        # Should have called git pull --ff-only
+        assert any("pull" in str(c) for c in calls)
+
+    def test_clears_version_cache(self, capsys, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+        # Create a cache file
+        with open(cache_file, "w") as f:
+            f.write("{}")
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = "Already up to date.\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        monkeypatch.setattr("cli.engine_commands._restart", lambda: True)
+        monkeypatch.setattr("cli.engine_commands._is_running", lambda: True)
+
+        w._cmd_update()
+        assert not os.path.exists(cache_file)
+
+    def test_dispatch_routes_update(self, monkeypatch):
+        w = _import_wrapper()
+        called = {}
+        monkeypatch.setattr(w, "_cmd_update", lambda: called.update(yes=True))
+        monkeypatch.setattr("sys.argv", ["wrapper.py", "update"])
+        assert w._dispatch_cli() is True
+        assert called.get("yes")
 
 
 # ===========================================================================

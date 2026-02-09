@@ -3,6 +3,13 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-02-09
+
+### Added
+- Version update check at startup: compares local HEAD with remote, shows "up to date" or "update available" inline on the banner
+- `cc update` command: pulls latest code and restarts the engine daemon in one step
+- 24h cache (`~/.claudemon/version.check`) to avoid hitting git remote on every launch
+
 ## [0.2.1] - 2026-02-09
 
 ### Fixed

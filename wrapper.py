@@ -11,8 +11,10 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
+VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
+VERSION_CHECK_TTL = 86400  # 24 hours
 DEBUG = os.environ.get("CLAUDEMON_DEBUG", "") == "1"
 DEBUG_LOG = os.path.expanduser("~/.claudemon/debug.log") if DEBUG else None
 SPINNER_IDLE_TIMEOUT = 2.0
@@ -200,6 +202,62 @@ def _check_engine_health():
     return True
 
 
+def _check_update() -> tuple:
+    """Compare local HEAD with remote HEAD.
+
+    Returns (status, message) where status is "current", "behind", or "error".
+    Uses a 24h cache (~/.claudemon/version.check) to avoid hitting the
+    remote on every startup. Never raises.
+    """
+    try:
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Current local HEAD
+        local = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=3, cwd=repo_dir,
+        ).stdout.strip()
+        if not local:
+            return ("error", "")
+
+        # Check cache
+        try:
+            with open(VERSION_CHECK_FILE) as f:
+                cache = json.load(f)
+            if (
+                time.time() - cache.get("ts", 0) < VERSION_CHECK_TTL
+                and cache.get("local") == local
+            ):
+                if cache.get("remote") and cache["remote"] != local:
+                    return ("behind", "update available — run: cc update")
+                return ("current", "")
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass
+
+        # Fetch remote HEAD
+        r = subprocess.run(
+            ["git", "ls-remote", "origin", "HEAD"],
+            capture_output=True, text=True, timeout=3, cwd=repo_dir,
+        )
+        remote = r.stdout.split()[0] if r.returncode == 0 and r.stdout.strip() else ""
+
+        # Write cache atomically
+        try:
+            os.makedirs(os.path.dirname(VERSION_CHECK_FILE), exist_ok=True)
+            tmp = VERSION_CHECK_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"ts": time.time(), "local": local, "remote": remote}, f)
+            os.replace(tmp, VERSION_CHECK_FILE)
+        except OSError:
+            pass
+
+        if remote and remote != local:
+            return ("behind", "update available — run: cc update")
+        return ("current", "")
+    except Exception:
+        return ("error", "")
+
+
 def print_banner() -> None:
     """Print a single-line startup banner before launching Claude."""
     DIM = "\033[2m"
@@ -220,7 +278,15 @@ def print_banner() -> None:
     MAGENTA = "\033[35m"
     BOLD = "\033[1m"
 
-    line = f"{BOLD}{MAGENTA}claudemon{RESET} {CYAN}v{VERSION}{RESET} — {status_str}"
+    update_status, update_msg = _check_update()
+    if update_status == "current":
+        ver_suffix = f" {DIM}✓ up to date{RESET}"
+    elif update_status == "behind":
+        ver_suffix = f" {YELLOW}↑ update available{RESET}"
+    else:
+        ver_suffix = ""
+
+    line = f"{BOLD}{MAGENTA}claudemon{RESET} {CYAN}v{VERSION}{RESET}{ver_suffix} — {status_str}"
     print(line, file=sys.stderr)
 
     if status == "error" and not os.environ.get("CLAUDEMON_MODE", "").strip():
@@ -232,6 +298,9 @@ def print_banner() -> None:
         print(f"  {YELLOW}⚠ engine not running — run: cc engine restart{RESET}", file=sys.stderr)
     elif isinstance(engine_ok, str):
         print(f"  {YELLOW}⚠ engine error: {engine_ok}{RESET}", file=sys.stderr)
+
+    if update_msg:
+        print(f"  {YELLOW}◆ {update_msg}{RESET}", file=sys.stderr)
 
     if not _check_statusline():
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.py")
@@ -540,6 +609,58 @@ def _install_statusline() -> None:
     print(f"\033[32m✓\033[0m claudemon statusline installed")
 
 
+def _cmd_update() -> None:
+    """Pull latest code and restart the engine daemon."""
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 1. git pull
+    print(f"  Pulling latest changes...", file=sys.stderr)
+    r = subprocess.run(
+        ["git", "-C", repo_dir, "pull", "--ff-only"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if r.returncode != 0:
+        print(f"  {RED}✗ git pull failed:{RESET} {r.stderr.strip()}", file=sys.stderr)
+        print(f"  {DIM}Try manually: git -C {repo_dir} pull{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    pull_output = r.stdout.strip()
+    if "Already up to date" in pull_output:
+        print(f"  {GREEN}✓{RESET} Already up to date", file=sys.stderr)
+    else:
+        print(f"  {GREEN}✓{RESET} Updated", file=sys.stderr)
+        for line in pull_output.splitlines():
+            if line.strip():
+                print(f"    {DIM}{line}{RESET}", file=sys.stderr)
+
+    # 2. Restart engine
+    from cli.engine_commands import _restart, _is_running
+    import time as _time
+    print(f"  Restarting engine...", file=sys.stderr)
+    if _restart():
+        _time.sleep(0.5)
+        if _is_running():
+            print(f"  {GREEN}✓{RESET} Engine restarted", file=sys.stderr)
+        else:
+            print(f"  {YELLOW}⚠{RESET} Loaded but process not yet running", file=sys.stderr)
+    else:
+        print(f"  {YELLOW}⚠{RESET} Engine restart failed — run: cc engine restart", file=sys.stderr)
+
+    # 3. Clear version cache so next launch shows fresh status
+    try:
+        os.remove(VERSION_CHECK_FILE)
+    except OSError:
+        pass
+
+    print(file=sys.stderr)
+
+
 def _dispatch_cli():
     """Check if argv[1] is a claudemon CLI flag; if so, delegate to cli.main."""
     if len(sys.argv) < 2:
@@ -547,6 +668,9 @@ def _dispatch_cli():
     first = sys.argv[1]
     if first == "--install-statusline":
         _install_statusline()
+        return True
+    if first == "update":
+        _cmd_update()
         return True
     if first == "engine":
         from cli.engine_commands import engine_main
