@@ -491,6 +491,28 @@ class TestCheckUpdate:
         assert "update available" in msg
         assert "cc update" in msg
 
+    def test_returns_current_when_ahead(self, tmp_path, monkeypatch):
+        """Local has commits not yet pushed — should NOT say 'update available'."""
+        w = _import_wrapper()
+        cache_file = str(tmp_path / "version.check")
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", cache_file)
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = ""
+            if cmd[1] == "rev-parse":
+                R.stdout = "aaa111\n"
+            elif cmd[1] == "ls-remote":
+                R.stdout = "bbb222\tHEAD\n"
+            elif cmd[1] == "merge-base":
+                R.returncode = 1  # local is NOT ancestor of remote (we're ahead)
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        status, msg = w._check_update()
+        assert status == "current"
+
     def test_uses_fresh_cache(self, tmp_path, monkeypatch):
         w = _import_wrapper()
         cache_file = str(tmp_path / "version.check")
@@ -501,9 +523,9 @@ class TestCheckUpdate:
         with open(cache_file, "w") as f:
             _json.dump({"ts": time.time(), "local": "aaa111", "remote": "bbb222"}, f)
 
-        call_count = [0]
+        cmds = []
         def fake_run(cmd, **kw):
-            call_count[0] += 1
+            cmds.append(cmd[1])
             class R:
                 returncode = 0
                 stdout = "aaa111\n"
@@ -513,8 +535,10 @@ class TestCheckUpdate:
         status, msg = w._check_update()
         assert status == "behind"
         assert "update available" in msg
-        # Only rev-parse should be called (to verify local), not ls-remote
-        assert call_count[0] == 1
+        # rev-parse + merge-base, but NOT ls-remote (cache hit)
+        assert "rev-parse" in cmds
+        assert "merge-base" in cmds
+        assert "ls-remote" not in cmds
 
     def test_skips_stale_cache(self, tmp_path, monkeypatch):
         w = _import_wrapper()
@@ -526,9 +550,9 @@ class TestCheckUpdate:
         with open(cache_file, "w") as f:
             _json.dump({"ts": time.time() - 90000, "local": "aaa111", "remote": "aaa111"}, f)
 
-        call_count = [0]
+        cmds = []
         def fake_run(cmd, **kw):
-            call_count[0] += 1
+            cmds.append(cmd[1])
             class R:
                 returncode = 0
                 stdout = "aaa111\n" if cmd[1] == "rev-parse" else "bbb222\tHEAD\n"
@@ -538,8 +562,9 @@ class TestCheckUpdate:
         status, msg = w._check_update()
         assert status == "behind"
         assert "update available" in msg
-        # Both rev-parse and ls-remote should be called
-        assert call_count[0] == 2
+        # rev-parse + ls-remote + merge-base
+        assert "ls-remote" in cmds
+        assert "merge-base" in cmds
 
     def test_returns_error_on_failure(self, tmp_path, monkeypatch):
         w = _import_wrapper()

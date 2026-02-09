@@ -220,6 +220,14 @@ def _check_update() -> tuple:
         if not local:
             return ("error", "")
 
+        def _is_behind(local_sha, remote_sha):
+            """True only if local is an ancestor of remote (i.e. remote is ahead)."""
+            r = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", local_sha, remote_sha],
+                capture_output=True, timeout=3, cwd=repo_dir,
+            )
+            return r.returncode == 0
+
         # Check cache
         try:
             with open(VERSION_CHECK_FILE) as f:
@@ -228,7 +236,8 @@ def _check_update() -> tuple:
                 time.time() - cache.get("ts", 0) < VERSION_CHECK_TTL
                 and cache.get("local") == local
             ):
-                if cache.get("remote") and cache["remote"] != local:
+                remote = cache.get("remote", "")
+                if remote and remote != local and _is_behind(local, remote):
                     return ("behind", "update available — run: cc update")
                 return ("current", "")
         except (OSError, json.JSONDecodeError, KeyError):
@@ -251,7 +260,7 @@ def _check_update() -> tuple:
         except OSError:
             pass
 
-        if remote and remote != local:
+        if remote and remote != local and _is_behind(local, remote):
             return ("behind", "update available — run: cc update")
         return ("current", "")
     except Exception:
