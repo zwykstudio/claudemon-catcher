@@ -85,6 +85,39 @@ class TestProcessChunk:
         assert pending["word"] == original_pending["word"]
         assert pending["ts"] == original_pending["ts"]
 
+    def test_carriage_return_clears_old_frames(self):
+        """Spinner \r rewrites should not accumulate in the buffer."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Simulate spinner cycling: multiple frames with \r
+        chunk = "✶ Propagating…\r✳ Propagating…\r✻ Propagating…".encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        # Only one copy of the word should be in seen
+        assert "Propagating" in seen
+        # Buffer should only have the last frame, not all three
+        assert buf.count("Propagating") == 1
+
+    def test_carriage_return_prevents_corruption(self):
+        """Split reads with \r should not produce truncated words."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # First chunk: spinner frame + start of rewrite
+        buf = w.process_chunk("✶ Propagating…\r✳ Propag".encode(), buf, seen, pending, h, sid)
+        assert "Propagating" in seen  # first frame captured
+
+        # Second chunk: rest of the rewrite
+        buf = w.process_chunk("ating…".encode(), buf, seen, pending, h, sid)
+        # "Propaging" should NOT be captured (it's a corruption)
+        assert "Propaging" not in seen
+        # Only "Propagating" should be in seen (duplicate, correctly ignored)
+        assert len(seen) == 1
+
+    def test_word_across_chunks_without_cr(self):
+        """Word split across two reads (no \\r) should still be captured."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        buf = w.process_chunk("✶ Propag".encode(), buf, seen, pending, h, sid)
+        assert not seen  # not yet complete
+        buf = w.process_chunk("ating…".encode(), buf, seen, pending, h, sid)
+        assert "Propagating" in seen
+
 
 # ===========================================================================
 # flush_pending

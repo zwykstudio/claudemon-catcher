@@ -3,6 +3,11 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-02-09
+
+### Fixed
+- Truncated word captures (e.g. "Propaging" instead of "Propagating") caused by spinner `\r` rewrites accumulating in the buffer
+
 ## [0.2.3] - 2026-02-09
 
 ### Fixed

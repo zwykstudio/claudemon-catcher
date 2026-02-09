@@ -11,7 +11,7 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -129,6 +129,13 @@ def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, 
             buf = buf[idx + 1:]
     elif DEBUG and (has_spinner or "…" in clean):
         dbg(f"  --- {'ALREADY SEEN: ' + word if word and word in seen else 'NO MATCH'}")
+
+    # Simulate \r (carriage return): the terminal overwrites the current line
+    # from the start. Discard stale content before the last \r to prevent
+    # accumulating overlapping spinner frames that cause word corruption.
+    cr_idx = buf.rfind("\r")
+    if cr_idx != -1:
+        buf = buf[cr_idx + 1:]
 
     return buf
 
