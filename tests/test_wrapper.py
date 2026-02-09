@@ -523,6 +523,13 @@ class TestCliDispatch:
         monkeypatch.setattr("sys.argv", ["wrapper.py", "fix the auth bug"])
         assert w._dispatch_cli() is False
 
+    def test_dispatch_cli_ignores_flags_after_first_arg(self, monkeypatch):
+        """CLI flags in argv[2:] should NOT be intercepted (they're for claude)."""
+        w = _import_wrapper()
+        for flag in ["--stats", "--list", "--dashboard", "-d", "--help", "-h"]:
+            monkeypatch.setattr("sys.argv", ["wrapper.py", "-p", flag])
+            assert w._dispatch_cli() is False, f"{flag} in argv[2] should not be intercepted"
+
 
 # ===========================================================================
 # Polling and debug handle

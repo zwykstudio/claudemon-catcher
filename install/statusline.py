@@ -116,20 +116,21 @@ def main():
     now = time.time()
 
     # Phase 1: Word is currently being captured (spinner still active)
-    # Show immediately — no waiting
+    # Show immediately — unless engine already has the result (fall through to Phase 3)
     if live_word and live_phase == "capturing" and (now - live_ts) < 120:
-        elapsed = now - float((live or {}).get("start", live_ts))
-        elapsed_str = f"{elapsed:.0f}s" if elapsed >= 1 else ""
-        line = f"{live_word}"
-        if elapsed_str:
-            line += f" {DIM}{elapsed_str}{RST}"
-        line += f" {DIM}...{RST}"
-        _debug(f"-> capturing {live_word} ({elapsed_str})")
-        if summary:
-            print(f"{base} | {TAG} {line} ({summary})")
-        else:
-            print(f"{base} | {TAG} {line}")
-        return
+        if not engine_has_word(live_word):
+            elapsed = now - float((live or {}).get("start", live_ts))
+            elapsed_str = f"{elapsed:.0f}s" if elapsed >= 1 else ""
+            line = f"{live_word}"
+            if elapsed_str:
+                line += f" {DIM}{elapsed_str}{RST}"
+            line += f" {DIM}...{RST}"
+            _debug(f"-> capturing {live_word} ({elapsed_str})")
+            if summary:
+                print(f"{base} | {TAG} {line} ({summary})")
+            else:
+                print(f"{base} | {TAG} {line}")
+            return
 
     # Phase 2: Word was flushed, waiting for engine sync
     # Brief poll (up to ~3s) since it was already submitted

@@ -11,7 +11,7 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 DEBUG = os.environ.get("CLAUDEMON_DEBUG", "") == "1"
 DEBUG_LOG = os.path.expanduser("~/.claudemon/debug.log") if DEBUG else None
@@ -324,7 +324,7 @@ def print_recap(sid: str, seen: set, start_time: float) -> None:
         if xp_str:
             parts.append(f"{DIM}{xp_str:>7s}{RESET}")
         if dur_str:
-            parts.append(f"{DIM}{dur_str:>6s}{RESET}")
+            parts.append(f"{DIM}{dur_str:>7s}{RESET}")
         if event_str:
             parts.append(f" {event_str}")
         print("".join(parts), file=out)
@@ -541,15 +541,18 @@ def _install_statusline() -> None:
 
 
 def _dispatch_cli():
-    """Check if argv contains a CLI flag; if so, delegate to cli.main."""
-    if "--install-statusline" in sys.argv[1:]:
+    """Check if argv[1] is a claudemon CLI flag; if so, delegate to cli.main."""
+    if len(sys.argv) < 2:
+        return False
+    first = sys.argv[1]
+    if first == "--install-statusline":
         _install_statusline()
         return True
-    if len(sys.argv) > 1 and sys.argv[1] == "engine":
+    if first == "engine":
         from cli.engine_commands import engine_main
         engine_main(sys.argv[2:])
         return True
-    if any(arg in CLI_FLAGS for arg in sys.argv[1:]):
+    if first in CLI_FLAGS:
         from cli.main import main as cli_main
         cli_main()
         return True

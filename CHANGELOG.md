@@ -3,6 +3,13 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-02-09
+
+### Fixed
+- CLI dispatch intercepted flags anywhere in argv (e.g. `cc -p "--help"` was caught by claudemon instead of passed to Claude) — now only checks argv[1]
+- Recap column spacing: XP and duration could merge when duration >= 100s (e.g. `+30xp411.9s`)
+- Statusline showed "capturing..." even when engine had already synced the word
+
 ## [0.2.0] - 2026-02-08
 
 ### Added
