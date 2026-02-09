@@ -14,6 +14,12 @@
     <key>WorkingDirectory</key>
     <string>__CLAUDEMON_DIR__</string>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
     <key>RunAtLoad</key>
     <true/>
 
