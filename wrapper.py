@@ -11,7 +11,7 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours

@@ -3,6 +3,11 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-02-09
+
+### Fixed
+- Update check no longer false-flags when local is ahead of remote (unpushed commits)
+
 ## [0.2.2] - 2026-02-09
 
 ### Added
