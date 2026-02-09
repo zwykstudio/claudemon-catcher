@@ -83,8 +83,8 @@ def main():
     def read_live():
         d = _read_json(live_file)
         if not d:
-            return "", 0.0
-        return d.get("word", ""), float(d.get("ts", 0))
+            return None
+        return d
 
     def read_engine():
         d = _read_json(engine_file)
@@ -92,27 +92,19 @@ def main():
             return {}
         return d
 
-    live_word, live_ts = read_live()
+    live = read_live()
     eng = read_engine()
+    live_word = (live or {}).get("word", "")
+    live_phase = (live or {}).get("phase", "")
+    live_ts = float((live or {}).get("ts", 0))
 
-    _debug(f"SID={sid} live={live_word}:{live_ts} eng={eng.get('word', '')}:{eng.get('ts', 0)}")
+    _debug(f"SID={sid} live={live_word}:{live_phase}:{live_ts} eng={eng.get('word', '')}:{eng.get('ts', 0)}")
 
-    def engine_has_synced_live():
-        return (eng.get("word") and eng["word"] == live_word
+    def engine_has_word(word):
+        return (eng.get("word") and eng["word"] == word
                 and float(eng.get("ts", 0)) >= live_ts)
 
-    # Poll for engine sync (up to ~8s)
-    now = time.time()
-    if live_word and (now - live_ts) < 120 and not engine_has_synced_live():
-        _debug(f"waiting for engine to sync '{live_word}'...")
-        for i in range(1, 17):
-            time.sleep(0.5)
-            eng = read_engine()
-            if engine_has_synced_live():
-                _debug(f"-> synced after {i}x0.5s")
-                break
-
-    # Build summary
+    # Build session summary from engine data
     eng_count = int(eng.get("count", 0))
     eng_total_xp = int(eng.get("total_xp", 0))
     summary = ""
@@ -122,10 +114,46 @@ def main():
         summary = f"{eng_count} caught"
 
     now = time.time()
+
+    # Phase 1: Word is currently being captured (spinner still active)
+    # Show immediately — no waiting
+    if live_word and live_phase == "capturing" and (now - live_ts) < 120:
+        elapsed = now - float((live or {}).get("start", live_ts))
+        elapsed_str = f"{elapsed:.0f}s" if elapsed >= 1 else ""
+        line = f"{live_word}"
+        if elapsed_str:
+            line += f" {DIM}{elapsed_str}{RST}"
+        line += f" {DIM}...{RST}"
+        _debug(f"-> capturing {live_word} ({elapsed_str})")
+        if summary:
+            print(f"{base} | {TAG} {line} ({summary})")
+        else:
+            print(f"{base} | {TAG} {line}")
+        return
+
+    # Phase 2: Word was flushed, waiting for engine sync
+    # Brief poll (up to ~3s) since it was already submitted
+    if live_word and live_phase == "syncing" and (now - live_ts) < 30:
+        if not engine_has_word(live_word):
+            _debug(f"waiting for engine to sync '{live_word}'...")
+            for i in range(1, 7):
+                time.sleep(0.5)
+                eng = read_engine()
+                if engine_has_word(live_word):
+                    _debug(f"-> synced after {i}x0.5s")
+                    # Refresh summary
+                    eng_count = int(eng.get("count", 0))
+                    eng_total_xp = int(eng.get("total_xp", 0))
+                    if eng_total_xp > 0:
+                        summary = f"{eng_count} caught \u00b7 {eng_total_xp}xp"
+                    elif eng_count > 0:
+                        summary = f"{eng_count} caught"
+                    break
+
+    # Phase 3: Show synced engine data (if available and recent)
     eng_word = eng.get("word", "")
     eng_ts = float(eng.get("ts", 0))
 
-    # Show synced result
     if eng_word and (now - eng_ts) < 300:
         line = eng_word
         eng_xp = int(eng.get("xp", 0))
@@ -149,10 +177,14 @@ def main():
         print(f"{base} | {TAG} {line} ({summary})")
         return
 
-    # Fallback: capturing (engine didn't sync in time)
-    if live_word and (now - live_ts) < 120:
-        _debug(f"-> capturing {live_word} (engine timeout)")
-        line = f"{DIM}{live_word}...{RST}"
+    # Phase 4: Syncing but engine didn't respond in time — show word without xp
+    if live_word and live_phase == "syncing" and (now - live_ts) < 120:
+        dur = (live or {}).get("duration", 0)
+        line = live_word
+        if dur:
+            line += f" {DIM}{dur}s{RST}"
+        line += f" {DIM}syncing...{RST}"
+        _debug(f"-> syncing {live_word} (engine timeout)")
         if summary:
             print(f"{base} | {TAG} {line} ({summary})")
         else:
