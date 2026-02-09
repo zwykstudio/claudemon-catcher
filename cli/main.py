@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-main.py - CLI entry point for Claudemon.
+Claudemon Catcher — gotta catch 'em all, while you code.
 
 Usage:
-    cc --stats       Show statistics
-    cc --list        List all claudemons
-    cc --dashboard   Open cloud dashboard in browser
+    cc "your prompt"              Use Claude — catches happen automatically
+    cc --stats                    Show your stats
+    cc --list                     List all your creatures
+    cc --dashboard, -d            Open cloud dashboard in browser
+    cc --install-statusline       Configure the Claude Code statusline
 
-For capturing words from Claude CLI, use wrapper.py instead.
+Engine management:
+    cc engine                     Show engine daemon status
+    cc engine restart             Restart the engine daemon
+    cc engine update-key [KEY]    Update API key in daemon config
+    cc engine reset               Reset engine state and restart
 """
 
 import sys
@@ -32,8 +38,8 @@ def main():
     elif "--help" in args or "-h" in args:
         print(__doc__)
     else:
-        print("Usage: cc [--stats|--list|--dashboard]")
-        print("For Claude CLI capture, use: python wrapper.py [claude args...]")
+        print("Usage: cc [--stats | --list | --dashboard | engine | --help]")
+        print("Run cc --help for all commands.")
 
 
 if __name__ == "__main__":

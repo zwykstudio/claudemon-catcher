@@ -9,7 +9,7 @@ Alias:  alias cc='python3 /path/to/wrapper.py'
 Output: ~/.claudemon/catches.jsonl
 """
 
-import atexit, hashlib, hmac, json, os, platform, re, shutil, sys, time, uuid
+import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
 VERSION = "0.2.0"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
@@ -157,6 +157,49 @@ def _check_api_key() -> tuple[str, str]:
     return ("error", "no API key set")
 
 
+def _check_engine_health():
+    """Quick local check: is the engine daemon running and healthy?
+
+    Returns:
+        True  — running and healthy (or can't determine)
+        False — definitely not running
+        str   — running but last sync had an error (returns error message)
+    """
+    try:
+        if platform.system() == "Darwin":
+            r = subprocess.run(
+                ["launchctl", "list", "com.claudemon.engine"],
+                capture_output=True, timeout=2,
+            )
+            if r.returncode != 0:
+                return False
+        elif platform.system() == "Linux":
+            r = subprocess.run(
+                ["systemctl", "--user", "is-active", "claudemon-engine"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if r.stdout.strip() != "active":
+                return False
+        else:
+            return True  # can't check on this platform
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # don't warn if we can't check
+
+    # Check health file for recent errors
+    health_file = os.path.expanduser("~/.claudemon/engine.status")
+    try:
+        with open(health_file) as f:
+            health = json.load(f)
+        if health.get("status") == "error":
+            age = time.time() - health.get("ts", 0)
+            if age < 3600:  # only warn about recent errors
+                return health.get("error", "unknown error")
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return True
+
+
 def print_banner() -> None:
     """Print a single-line startup banner before launching Claude."""
     DIM = "\033[2m"
@@ -182,6 +225,13 @@ def print_banner() -> None:
 
     if status == "error" and not os.environ.get("CLAUDEMON_MODE", "").strip():
         print(f"  {DIM}set CLAUDEMON_API_KEY or CLAUDEMON_MODE=local{RESET}", file=sys.stderr)
+
+    # Quick engine health check (no network calls)
+    engine_ok = _check_engine_health()
+    if engine_ok is False:
+        print(f"  {YELLOW}⚠ engine not running — run: cc engine restart{RESET}", file=sys.stderr)
+    elif isinstance(engine_ok, str):
+        print(f"  {YELLOW}⚠ engine error: {engine_ok}{RESET}", file=sys.stderr)
 
     if not _check_statusline():
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.py")
@@ -494,6 +544,10 @@ def _dispatch_cli():
     """Check if argv contains a CLI flag; if so, delegate to cli.main."""
     if "--install-statusline" in sys.argv[1:]:
         _install_statusline()
+        return True
+    if len(sys.argv) > 1 and sys.argv[1] == "engine":
+        from cli.engine_commands import engine_main
+        engine_main(sys.argv[2:])
         return True
     if any(arg in CLI_FLAGS for arg in sys.argv[1:]):
         from cli.main import main as cli_main

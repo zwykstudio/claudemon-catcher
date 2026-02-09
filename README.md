@@ -55,6 +55,10 @@ cc --stats                 Show your stats
 cc --list                  List all your creatures
 cc --dashboard             Open cloud dashboard
 cc --install-statusline    Configure the statusline
+cc engine                  Show engine daemon status
+cc engine restart          Restart the engine daemon
+cc engine update-key [K]   Update API key in daemon config
+cc engine reset            Reset engine state and restart
 ```
 
 ## Configuration
