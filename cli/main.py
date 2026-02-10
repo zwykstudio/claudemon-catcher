@@ -22,7 +22,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cli.commands import show_stats, show_list, open_dashboard
+from cli.commands import open_dashboard, show_list, show_stats
 
 
 def main():

@@ -9,9 +9,21 @@ Alias:  alias cc='python3 /path/to/wrapper.py'
 Output: ~/.claudemon/catches.jsonl
 """
 
-import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
+import atexit
+import hashlib
+import hmac
+import json
+import os
+import platform
+import random
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
 
-VERSION = "0.2.5"
+VERSION = "0.2.6"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -321,7 +333,6 @@ def print_banner() -> None:
         print(f"  {YELLOW}◆ {update_msg}{RESET}", file=sys.stderr)
 
     if not _check_statusline():
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install", "statusline.py")
         print(
             f"  {DIM}tip: add claudemon to your statusline:{RESET} "
             f"{DIM}cc --install-statusline{RESET}",
@@ -330,8 +341,6 @@ def print_banner() -> None:
 
     print(file=sys.stderr)
 
-
-import random
 
 RECAP_MESSAGES = [
     "Keep catching 'em all!",
@@ -440,7 +449,11 @@ def find_claude() -> str:
 
 
 def _main_posix() -> None:
-    import fcntl, pty, select, termios, tty
+    import fcntl
+    import pty
+    import select
+    import termios
+    import tty
 
     claude = find_claude()
     print_banner()
@@ -624,7 +637,7 @@ def _install_statusline() -> None:
         json.dump(cfg, f, indent=2)
         f.write("\n")
 
-    print(f"\033[32m✓\033[0m claudemon statusline installed")
+    print("\033[32m✓\033[0m claudemon statusline installed")
 
 
 def _cmd_update() -> None:
@@ -638,7 +651,7 @@ def _cmd_update() -> None:
     repo_dir = os.path.dirname(os.path.abspath(__file__))
 
     # 1. git pull
-    print(f"  Pulling latest changes...", file=sys.stderr)
+    print("  Pulling latest changes...", file=sys.stderr)
     r = subprocess.run(
         ["git", "-C", repo_dir, "pull", "--ff-only"],
         capture_output=True, text=True, timeout=30,
@@ -658,9 +671,10 @@ def _cmd_update() -> None:
                 print(f"    {DIM}{line}{RESET}", file=sys.stderr)
 
     # 2. Restart engine
-    from cli.engine_commands import _restart, _is_running
     import time as _time
-    print(f"  Restarting engine...", file=sys.stderr)
+
+    from cli.engine_commands import _is_running, _restart
+    print("  Restarting engine...", file=sys.stderr)
     if _restart():
         _time.sleep(0.5)
         if _is_running():

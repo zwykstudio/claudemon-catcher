@@ -3,6 +3,22 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-02-10
+
+### Fixed
+- **Security**: PowerShell notification injection — user strings no longer interpolated in PS code (uses `-EncodedCommand` + env vars)
+- **Security**: PlistBuddy command injection — API key now passed via `defaults write` with strict alphanumeric validation
+- **Security**: `.claude/` added to `.gitignore` to prevent accidental commit of API keys
+- SQLite `DeprecationWarning` on Python 3.12+ — dates stored as ISO strings instead of relying on deprecated implicit adapters
+
+### Added
+- Ruff linter with `pyproject.toml` configuration (`E`, `F`, `W`, `I` rules)
+- `pyproject.toml` with project metadata and dev dependencies
+- 10 new tests covering security fixes (PowerShell injection, key validation, PlistBuddy)
+
+### Changed
+- Cleaned up 35 lint issues (unused imports, dead variables, f-strings without placeholders, unsorted imports)
+
 ## [0.2.5] - 2026-02-10
 
 ### Fixed

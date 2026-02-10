@@ -38,7 +38,6 @@ def _run_statusline(tmp_dir, sid, live_data=None, engine_data=None,
     """Helper to run statusline.py with controlled files and env."""
     import subprocess
 
-    sl_dir = str(tmp_dir)
     if live_data is not None:
         (tmp_dir / f"statusline-{sid}-live.json").write_text(json.dumps(live_data))
     if engine_data is not None:

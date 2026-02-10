@@ -33,7 +33,6 @@ def _raw_connection():
     os.makedirs(DB_PATH.parent, exist_ok=True)
     conn = sqlite3.connect(
         DB_PATH,
-        detect_types=sqlite3.PARSE_DECLTYPES,
         timeout=DB_TIMEOUT,
         isolation_level="DEFERRED"
     )
@@ -136,7 +135,7 @@ def catch_word(word):
 
     Thread-safe: uses retry logic for concurrent access.
     """
-    now = datetime.now()
+    now = datetime.now().isoformat()
 
     with get_connection() as conn:
         cursor = conn.execute(

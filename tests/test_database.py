@@ -5,13 +5,10 @@ tests/test_database.py - Tests for database: game logic, evolution, team,
 
 import sqlite3
 import threading
-import time
 from unittest.mock import patch
 
 import pytest
-
 from helpers import _import_database
-
 
 # ===========================================================================
 # Evolution
@@ -121,8 +118,9 @@ class TestLazyInitDb:
 
     def test_no_init_on_import(self):
         """Module-level init_db() is removed — flag starts False."""
-        import engine.database as db
         import inspect
+
+        import engine.database as db
         source = inspect.getsource(db)
         # Verify there's no bare `init_db()` call at module level (outside def/class)
         lines = source.split("\n")

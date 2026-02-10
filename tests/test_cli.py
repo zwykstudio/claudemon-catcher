@@ -3,9 +3,9 @@ tests/test_cli.py - Tests for CLI display and MCP formatting.
 """
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ===========================================================================
 # CLI display
@@ -158,3 +158,91 @@ class TestTailLines:
         """Fix #9: datetime is imported at module level in mcp/server.py."""
         from mcp import server
         assert hasattr(server, "datetime")
+
+
+# ===========================================================================
+# Engine key validation & update
+# ===========================================================================
+
+class TestCmdUpdateKeyValidation:
+    """API key validation rejects non-alphanumeric characters."""
+
+    def test_rejects_key_with_semicolons(self, monkeypatch, capsys):
+        from cli import engine_commands
+        monkeypatch.setattr(engine_commands, "IS_MAC", False)
+        monkeypatch.setattr(engine_commands, "IS_LINUX", False)
+        engine_commands.cmd_update_key(["sk_claudemon_; rm -rf /"])
+        err = capsys.readouterr().err
+        assert "Invalid key format" in err
+
+    def test_rejects_key_with_spaces(self, monkeypatch, capsys):
+        from cli import engine_commands
+        engine_commands.cmd_update_key(["sk_claudemon_abc def"])
+        err = capsys.readouterr().err
+        assert "Invalid key format" in err
+
+    def test_rejects_key_with_quotes(self, monkeypatch, capsys):
+        from cli import engine_commands
+        engine_commands.cmd_update_key(['sk_claudemon_abc"def'])
+        err = capsys.readouterr().err
+        assert "Invalid key format" in err
+
+    def test_rejects_key_with_dollar(self, monkeypatch, capsys):
+        from cli import engine_commands
+        engine_commands.cmd_update_key(["sk_claudemon_abc$(whoami)"])
+        err = capsys.readouterr().err
+        assert "Invalid key format" in err
+
+    def test_accepts_valid_alphanumeric_key(self, monkeypatch, capsys):
+        from cli import engine_commands
+        monkeypatch.setattr(engine_commands, "IS_MAC", True)
+        monkeypatch.setattr(engine_commands, "IS_LINUX", False)
+        # Should pass validation but fail at plist check
+        monkeypatch.setattr("os.path.isfile", lambda p: False)
+        engine_commands.cmd_update_key(["sk_claudemon_WWv9ZTXYtTJ5H1QD"])
+        err = capsys.readouterr().err
+        # Should have passed validation and hit "plist not found"
+        assert "Invalid key format" not in err
+        assert "plist not found" in err
+
+    def test_rejects_empty_suffix(self, monkeypatch, capsys):
+        from cli import engine_commands
+        engine_commands.cmd_update_key(["sk_claudemon_"])
+        err = capsys.readouterr().err
+        assert "Invalid key format" in err
+
+
+class TestCmdUpdateKeyMac:
+    """macOS uses 'defaults write' instead of PlistBuddy for the API key."""
+
+    def test_uses_defaults_write_not_plistbuddy_for_key(self, monkeypatch, tmp_path):
+        from cli import engine_commands
+
+        monkeypatch.setattr(engine_commands, "IS_MAC", True)
+        monkeypatch.setattr(engine_commands, "IS_LINUX", False)
+        plist = tmp_path / "test.plist"
+        plist.write_text("<plist></plist>")
+        monkeypatch.setattr(engine_commands, "PLIST_PATH", str(plist))
+
+        calls = []
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        monkeypatch.setattr(engine_commands, "_restart", lambda: True)
+
+        engine_commands.cmd_update_key(["sk_claudemon_abc123"])
+
+        # First call should be 'defaults write' with key as separate arg
+        defaults_call = calls[0]
+        assert defaults_call[0] == "defaults"
+        assert defaults_call[1] == "write"
+        assert "CLAUDEMON_API_KEY" in defaults_call
+        assert "sk_claudemon_abc123" in defaults_call
+
+        # PlistBuddy used only for Delete of CLAUDEMON_MODE (no user input)
+        plistbuddy_calls = [c for c in calls if "/usr/libexec/PlistBuddy" in str(c)]
+        for c in plistbuddy_calls:
+            # Ensure no API key leaks into PlistBuddy commands
+            assert "sk_claudemon_abc123" not in str(c)

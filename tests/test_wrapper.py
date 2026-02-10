@@ -9,10 +9,7 @@ import os
 import time
 from unittest.mock import patch
 
-import pytest
-
 from helpers import _import_wrapper
-
 
 # ===========================================================================
 # Word regex
@@ -62,7 +59,6 @@ class TestProcessChunk:
         w.CATCHES_FILE = catches_file
 
         buf = w.process_chunk("✶ Reasoning…".encode(), buf, seen, pending, h, sid)
-        first_ts = pending["ts"]
 
         # Small delay so duration > 0
         time.sleep(0.01)
@@ -1161,6 +1157,7 @@ class TestWrapperPolling:
     def test_windows_sleep_values_in_source(self):
         """Verify the sleep values are the reduced ones (not the old aggressive ones)."""
         import inspect
+
         import wrapper
         source = inspect.getsource(wrapper._main_windows)
         # stdin_reader should use 0.02, not 0.005

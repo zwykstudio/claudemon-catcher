@@ -4,11 +4,9 @@ tests/test_storage.py - Tests for storage: config routing, CloudStorage
 """
 
 import http.client
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ===========================================================================
 # Config routing
@@ -20,7 +18,7 @@ class TestGetStorage:
     def test_get_storage_cloud(self, monkeypatch):
         monkeypatch.delenv("CLAUDEMON_MODE", raising=False)
         monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_testkey123")
-        from engine.storage import get_storage, CloudStorage
+        from engine.storage import CloudStorage, get_storage
         s = get_storage()
         assert isinstance(s, CloudStorage)
 
@@ -30,12 +28,12 @@ class TestGetStorage:
         # Redirect DB so LocalStorage.__init__ doesn't touch real DB
         import engine.database as db
         monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-        from engine.storage import get_storage, LocalStorage
+        from engine.storage import LocalStorage, get_storage
         s = get_storage()
         assert isinstance(s, LocalStorage)
 
     def test_get_storage_errors(self, monkeypatch):
-        from engine.storage import get_storage, ConfigError
+        from engine.storage import ConfigError, get_storage
 
         # No key, cloud mode → error
         monkeypatch.delenv("CLAUDEMON_MODE", raising=False)

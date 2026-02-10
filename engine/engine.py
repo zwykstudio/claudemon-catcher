@@ -17,13 +17,12 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.storage import get_storage, ConfigError
 from engine.notifications import notify_catch
+from engine.storage import ConfigError, get_storage
 
 # Configuration
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
@@ -192,9 +191,12 @@ def handle_catch(storage, word: str, ts: float = None, proof: str = None, sid: s
             return
 
         flags = []
-        if result.is_new: flags.append("NEW")
-        if result.just_hatched: flags.append("HATCHED")
-        if result.evolved: flags.append("EVOLVED")
+        if result.is_new:
+            flags.append("NEW")
+        if result.just_hatched:
+            flags.append("HATCHED")
+        if result.evolved:
+            flags.append("EVOLVED")
         tag = f" [{', '.join(flags)}]" if flags else ""
         print(f"[engine] Synced: {word} lvl={result.new_level}{tag}")
 

@@ -12,6 +12,7 @@ Usage:
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -245,7 +246,7 @@ def cmd_status():
 
 def cmd_restart():
     """Restart the engine daemon."""
-    print(f"  Restarting engine...", file=sys.stderr)
+    print("  Restarting engine...", file=sys.stderr)
     if _restart():
         time.sleep(0.5)
         if _is_running():
@@ -265,12 +266,12 @@ def cmd_update_key(args: list[str]):
 
     if not key:
         print(f"  {_c(RED, 'No key provided.')}", file=sys.stderr)
-        print(f"  Usage: cc engine update-key <KEY>", file=sys.stderr)
-        print(f"  Or set CLAUDEMON_API_KEY in your environment.", file=sys.stderr)
+        print("  Usage: cc engine update-key <KEY>", file=sys.stderr)
+        print("  Or set CLAUDEMON_API_KEY in your environment.", file=sys.stderr)
         return
 
-    if not key.startswith("sk_claudemon_"):
-        print(f"  {_c(RED, 'Invalid key format.')} Must start with sk_claudemon_", file=sys.stderr)
+    if not re.fullmatch(r"sk_claudemon_[A-Za-z0-9]+", key):
+        print(f"  {_c(RED, 'Invalid key format.')} Must match sk_claudemon_<alphanumeric>", file=sys.stderr)
         return
 
     print(f"  Updating API key to {_c(D, _mask_key(key))}...", file=sys.stderr)
@@ -279,18 +280,17 @@ def cmd_update_key(args: list[str]):
         if not os.path.isfile(PLIST_PATH):
             print(f"  {_c(RED, 'Error:')} plist not found. Run install/setup.sh first.", file=sys.stderr)
             return
-        # Update plist with PlistBuddy
-        pb = "/usr/libexec/PlistBuddy"
-        subprocess.run([pb, "-c", "Delete :EnvironmentVariables:CLAUDEMON_API_KEY", PLIST_PATH],
-                       capture_output=True)
-        r = subprocess.run([pb, "-c", f"Add :EnvironmentVariables:CLAUDEMON_API_KEY string {key}", PLIST_PATH],
+        # Update plist — use 'defaults write' to safely handle values with special characters
+        r = subprocess.run(
+            ["defaults", "write", PLIST_PATH, "EnvironmentVariables", "-dict-add", "CLAUDEMON_API_KEY", key],
                            capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  {_c(RED, 'Failed to update plist:')} {r.stderr.strip()}", file=sys.stderr)
             return
-        # Also remove CLAUDEMON_MODE=local if it was set
-        subprocess.run([pb, "-c", "Delete :EnvironmentVariables:CLAUDEMON_MODE", PLIST_PATH],
-                       capture_output=True)
+        # Also remove CLAUDEMON_MODE=local if it was set (no user input — safe to use PlistBuddy)
+        subprocess.run(
+            ["/usr/libexec/PlistBuddy", "-c", "Delete :EnvironmentVariables:CLAUDEMON_MODE", PLIST_PATH],
+            capture_output=True)
 
     elif IS_LINUX:
         service_path = os.path.expanduser(f"~/.config/systemd/user/{SYSTEMD_UNIT}.service")
@@ -314,7 +314,7 @@ def cmd_update_key(args: list[str]):
         return
 
     # Restart
-    print(f"  Restarting engine...", file=sys.stderr)
+    print("  Restarting engine...", file=sys.stderr)
     if _restart():
         time.sleep(0.5)
         print(f"  {_c(GRN, '✓')} API key updated and engine restarted", file=sys.stderr)
@@ -335,7 +335,7 @@ def cmd_reset():
     else:
         print(f"  {_c(D, 'No state files to clear')}", file=sys.stderr)
 
-    print(f"  Restarting engine...", file=sys.stderr)
+    print("  Restarting engine...", file=sys.stderr)
     if _restart():
         time.sleep(0.5)
         print(f"  {_c(GRN, '✓')} Engine reset and restarted", file=sys.stderr)
@@ -357,11 +357,11 @@ def engine_main(args: list[str]):
     else:
         print(f"  Unknown action: {action}", file=sys.stderr)
         print(file=sys.stderr)
-        print(f"  Usage: cc engine [status|restart|update-key|reset]", file=sys.stderr)
+        print("  Usage: cc engine [status|restart|update-key|reset]", file=sys.stderr)
         print(file=sys.stderr)
         print(f"  {_c(B, 'Actions:')}", file=sys.stderr)
-        print(f"    status       Show engine health (default)", file=sys.stderr)
-        print(f"    restart      Restart the engine daemon", file=sys.stderr)
-        print(f"    update-key   Update API key in daemon config", file=sys.stderr)
-        print(f"    reset        Reset engine state and restart", file=sys.stderr)
+        print("    status       Show engine health (default)", file=sys.stderr)
+        print("    restart      Restart the engine daemon", file=sys.stderr)
+        print("    update-key   Update API key in daemon config", file=sys.stderr)
+        print("    reset        Reset engine state and restart", file=sys.stderr)
         print(file=sys.stderr)

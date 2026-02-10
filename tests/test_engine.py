@@ -7,9 +7,6 @@ import json
 import os
 from unittest.mock import MagicMock
 
-import pytest
-
-
 # ===========================================================================
 # update_statusline
 # ===========================================================================
@@ -18,9 +15,14 @@ class TestEngineUpdateStatusline:
     """update_statusline() writes per-session files with counts and XP."""
 
     def test_writes_per_session_file(self, tmp_path, monkeypatch):
-        from engine.engine import update_statusline, _session_count_map, _session_xp_map
-        from engine.engine import _session_duration_map, _session_catches_list, STATUSLINE_FILE
         import engine.engine as eng
+        from engine.engine import (
+            _session_catches_list,
+            _session_count_map,
+            _session_duration_map,
+            _session_xp_map,
+            update_statusline,
+        )
 
         monkeypatch.setattr(eng, "STATUSLINE_FILE", str(tmp_path / "statusline.json"))
 
@@ -44,9 +46,14 @@ class TestEngineUpdateStatusline:
         assert data["duration"] == 5.0
 
     def test_increments_session_counters(self, tmp_path, monkeypatch):
-        from engine.engine import update_statusline, _session_count_map, _session_xp_map
-        from engine.engine import _session_duration_map, _session_catches_list
         import engine.engine as eng
+        from engine.engine import (
+            _session_catches_list,
+            _session_count_map,
+            _session_duration_map,
+            _session_xp_map,
+            update_statusline,
+        )
 
         monkeypatch.setattr(eng, "STATUSLINE_FILE", str(tmp_path / "statusline.json"))
         _session_count_map.clear()
@@ -105,8 +112,7 @@ class TestEngineHandleCatchOrder:
 
     def test_statusline_before_notifications(self, tmp_path, monkeypatch):
         import engine.engine as eng
-        from engine.engine import _session_count_map, _session_xp_map
-        from engine.engine import _session_duration_map, _session_catches_list
+        from engine.engine import _session_catches_list, _session_count_map, _session_duration_map, _session_xp_map
 
         monkeypatch.setattr(eng, "STATUSLINE_FILE", str(tmp_path / "statusline.json"))
         monkeypatch.setattr(eng, "HEALTH_FILE", str(tmp_path / "engine.status"))
@@ -141,8 +147,7 @@ class TestEngineHandleCatchOrder:
 
     def test_notification_error_does_not_affect_statusline(self, tmp_path, monkeypatch):
         import engine.engine as eng
-        from engine.engine import _session_count_map, _session_xp_map
-        from engine.engine import _session_duration_map, _session_catches_list
+        from engine.engine import _session_catches_list, _session_count_map, _session_duration_map, _session_xp_map
 
         monkeypatch.setattr(eng, "STATUSLINE_FILE", str(tmp_path / "statusline.json"))
         monkeypatch.setattr(eng, "HEALTH_FILE", str(tmp_path / "engine.status"))

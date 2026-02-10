@@ -14,7 +14,6 @@ import time
 
 from helpers import STATUSLINE_PY, _run_statusline
 
-
 # ===========================================================================
 # Synced (engine has processed the word) — fast tests
 # ===========================================================================

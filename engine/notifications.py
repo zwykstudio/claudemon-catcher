@@ -14,7 +14,6 @@ import random
 import shutil
 import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -103,22 +102,26 @@ def _send_native_notification(title, message, word=None, level=None):
             return True
 
         elif system == "Windows":
-            safe_title = f"Claudemon — {title}".replace("'", "''")
-            safe_msg = message.replace("'", "''")
+            import base64
+            full_title = f"Claudemon \u2014 {title}"
             ps = (
                 "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');"
                 "$n = New-Object System.Windows.Forms.NotifyIcon;"
                 "$n.Icon = [System.Drawing.SystemIcons]::Application;"
-                f"$n.BalloonTipTitle = '{safe_title}';"
-                f"$n.BalloonTipText = '{safe_msg}';"
+                "$n.BalloonTipTitle = $env:_CMON_TITLE;"
+                "$n.BalloonTipText = $env:_CMON_MSG;"
                 "$n.Visible = $true;"
                 "$n.ShowBalloonTip(3000);"
                 "Start-Sleep 4;"
                 "$n.Dispose()"
             )
+            encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+            env = os.environ.copy()
+            env["_CMON_TITLE"] = full_title
+            env["_CMON_MSG"] = message
             subprocess.run(
-                ["powershell", "-WindowStyle", "Hidden", "-Command", ps],
-                capture_output=True, timeout=8,
+                ["powershell", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
+                capture_output=True, timeout=8, env=env,
             )
             return True
 

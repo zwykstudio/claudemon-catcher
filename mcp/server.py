@@ -24,7 +24,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engine.storage import get_storage, ConfigError
+from engine.storage import ConfigError, get_storage
 
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 

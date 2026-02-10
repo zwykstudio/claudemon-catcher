@@ -28,3 +28,6 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Claude Code local settings (may contain API keys)
+.claude/
