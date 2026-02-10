@@ -3,6 +3,12 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-02-10
+
+### Fixed
+- Corrupted word captures (e.g. "Dtermiing", "Bfuddling", "Propaging") caused by Ink's differential rendering using ANSI cursor positioning (`\x1b[nG`) — characters from different screen columns were concatenated into fake words
+- DEC private sequences (`\x1b[?2026h`, `\x1b[?25l`) no longer accumulate as noise in the buffer
+
 ## [0.2.4] - 2026-02-09
 
 ### Fixed

@@ -11,7 +11,7 @@ Output: ~/.claudemon/catches.jsonl
 
 import atexit, hashlib, hmac, json, os, platform, re, shutil, subprocess, sys, time, uuid
 
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -20,7 +20,8 @@ DEBUG_LOG = os.path.expanduser("~/.claudemon/debug.log") if DEBUG else None
 SPINNER_IDLE_TIMEOUT = 2.0
 _debug_f = None
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]")
+ANSI_RE = re.compile(r"\x1b\[\??[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]")
+CURSOR_MOVE_RE = re.compile(r"\x1b\[[0-9;]*[ABCDEFGHdf]")
 SPINNER_CHARS = "·✢✳✶✻✽"
 WORD_RE = re.compile(r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z-]*ing)…")
 
@@ -97,6 +98,7 @@ def flush_pending(pending: dict, sid: str, force: bool = False) -> None:
 def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, sid: str) -> str:
     session_hash.update(raw)
     text = raw.decode("utf-8", errors="replace")
+    text = CURSOR_MOVE_RE.sub(" ", text)  # preserve word boundaries at cursor jumps
     clean = re.sub(r"<[^>]+>", "", ANSI_RE.sub("", text))
     buf = (buf + clean)[-500:]
 

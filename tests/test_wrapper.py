@@ -118,6 +118,318 @@ class TestProcessChunk:
         buf = w.process_chunk("ating…".encode(), buf, seen, pending, h, sid)
         assert "Propagating" in seen
 
+    def test_cursor_positioning_prevents_concatenation(self):
+        """CSI CHA (\\x1b[nG) between characters should produce spaces, not contiguous text."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Simulate differential render: spinner at col 2, "P" at col 5, "c" at col 10
+        # Without fix: "Pc" concatenated. With fix: "P c" (space from cursor move).
+        chunk = ("\x1b[2G✻\x1b[5GP\x1b[10Gc").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        # Characters from different positions should NOT be adjacent
+        assert "Pc" not in buf
+
+    def test_dec_private_sequences_stripped(self):
+        """DEC private sequences like \\x1b[?2026h should be stripped cleanly."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        chunk = ("\x1b[?2026h✶ Reasoning…\x1b[?25l").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Reasoning" in seen
+        # DEC sequences should not appear in the buffer
+        assert "?" not in buf
+        assert "2026" not in buf
+
+    def test_differential_render_does_not_corrupt(self):
+        """Full scenario: partial spinner frames with cursor positioning should not produce fake words."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Frame 1: full word rendered normally
+        buf = w.process_chunk("✶ Precipitating…".encode(), buf, seen, pending, h, sid)
+        assert "Precipitating" in seen
+
+        # Frame 2: differential update — only spinner char + a few changed columns
+        # This simulates Ink updating spinner "✶" → "✻" at col 1, plus "tat" at cols 10-12
+        # Without fix: "✻tat" → buffer gets "tat" adjacent to prior content → corrupted word
+        # With fix: cursor moves become spaces, no fake word forms
+        chunk = ("\r\x1b[1G✻\x1b[10Gtat\r").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        # Should NOT produce any corrupted word like "Dtermiing" or "Tating"
+        corrupted_words = [w_match for w_match in seen if w_match != "Precipitating"]
+        assert corrupted_words == [], f"Unexpected corrupted words: {corrupted_words}"
+
+    # --- Real-world corruption scenarios from debug.log ---
+
+    def test_real_corruption_determining(self):
+        """Reproduce 'Dtermiing' corruption from differential render of 'Determining'.
+
+        Debug log showed:
+          CHUNK: '\\r✻Pc\\r'     ← spinner + scattered chars via cursor positioning
+        Without fix, fragments like 'D', 'termi', 'ing' from separate columns
+        would concatenate into 'Dtermiing'.
+        """
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Full frame first
+        buf = w.process_chunk("✶ Determining…".encode(), buf, seen, pending, h, sid)
+        assert "Determining" in seen
+
+        # Differential updates: spinner change + partial columns
+        for diff_chunk in [
+            "\r\x1b[1G✻\x1b[3Gt\x1b[8Gi\r",      # spinner + "t" col3 + "i" col8
+            "\r\x1b[1G✽\x1b[4Ge\x1b[10Gn\r",      # spinner + "e" col4 + "n" col10
+            "\r\x1b[1G✢\x1b[2GD\x1b[7Gm\r",       # spinner + "D" col2 + "m" col7
+        ]:
+            buf = w.process_chunk(diff_chunk.encode(), buf, seen, pending, h, sid)
+
+        # "Dtermiing" must NOT appear
+        assert "Dtermiing" not in seen
+        assert len(seen) == 1, f"Only 'Determining' expected, got: {seen}"
+
+    def test_real_corruption_befuddling(self):
+        """Reproduce 'Bfuddling' corruption from 'Befuddling'."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        buf = w.process_chunk("✶ Befuddling…".encode(), buf, seen, pending, h, sid)
+        assert "Befuddling" in seen
+
+        # Differential: scattered columns "B" col2, "f" col4, "ddl" cols6-8
+        buf = w.process_chunk(
+            ("\r\x1b[1G✻\x1b[2GB\x1b[4Gf\x1b[6Gddl\r").encode(),
+            buf, seen, pending, h, sid,
+        )
+        assert "Bfuddling" not in seen
+        assert len(seen) == 1
+
+    def test_real_corruption_propagating(self):
+        """Reproduce 'Propaging' corruption from split \\r + cursor moves."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        buf = w.process_chunk("✶ Propagating…".encode(), buf, seen, pending, h, sid)
+        assert "Propagating" in seen
+
+        # Differential with cursor jumps mid-word
+        buf = w.process_chunk(
+            ("\r\x1b[1G✳\x1b[6Gag\x1b[11Gng\r").encode(),
+            buf, seen, pending, h, sid,
+        )
+        assert "Propaging" not in seen
+        assert len(seen) == 1
+
+    # --- Cursor movement variants (all CSI codes that CURSOR_MOVE_RE handles) ---
+
+    def test_cursor_up_down_left_right(self):
+        """CUU(A), CUD(B), CUF(C), CUB(D) should all become spaces."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # A=up, B=down, C=forward, D=back — all are cursor moves
+        chunk = ("X\x1b[2AY\x1b[3BZ\x1b[1CW\x1b[4DV").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        # No two letters should be adjacent
+        assert "XY" not in buf
+        assert "YZ" not in buf
+        assert "ZW" not in buf
+        assert "WV" not in buf
+
+    def test_cursor_cup_hvp(self):
+        """CUP (H) and HVP (f) with row;col parameters should become spaces."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # \x1b[5;10H = CUP to row 5 col 10, \x1b[3;8f = HVP to row 3 col 8
+        chunk = ("A\x1b[5;10HB\x1b[3;8fC").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "AB" not in buf
+        assert "BC" not in buf
+
+    def test_cursor_cnl_cpl_vpa(self):
+        """CNL(E), CPL(F), VPA(d) should become spaces."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        chunk = ("X\x1b[2EY\x1b[1FZ\x1b[5dW").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "XY" not in buf
+        assert "YZ" not in buf
+        assert "ZW" not in buf
+
+    # --- DEC private sequences ---
+
+    def test_dec_bracketed_paste_mode_stripped(self):
+        """\\x1b[?2004h (enable bracketed paste) and \\x1b[?2004l (disable)."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        chunk = ("\x1b[?2004h✶ Thinking…\x1b[?2004l").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Thinking" in seen
+        assert "2004" not in buf
+
+    def test_dec_cursor_show_hide_stripped(self):
+        """\\x1b[?25h (show cursor) and \\x1b[?25l (hide cursor)."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        chunk = ("\x1b[?25l✳ Analyzing…\x1b[?25h").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Analyzing" in seen
+        assert "25" not in buf
+        assert "?" not in buf
+
+    def test_multiple_dec_sequences_in_one_chunk(self):
+        """Multiple DEC private sequences interspersed with content."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        chunk = (
+            "\x1b[?2026h\x1b[?25l"     # synchronized output + hide cursor
+            "✶ Manifesting…"
+            "\x1b[?25h\x1b[?2026l"     # show cursor + end synchronized output
+        ).encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Manifesting" in seen
+        assert "?" not in buf
+        assert "2026" not in buf
+        assert "25" not in buf
+
+    # --- Interaction between \r fix and cursor move fix ---
+
+    def test_cr_and_cursor_moves_combined(self):
+        """\\r resets line, cursor moves within the line — both should cooperate."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Full frame
+        buf = w.process_chunk("✶ Gallivanting…".encode(), buf, seen, pending, h, sid)
+        assert "Gallivanting" in seen
+
+        # Differential frame with \r + cursor positioning
+        # \r clears to start, then cursor jumps scatter partial chars
+        buf = w.process_chunk(
+            ("\r\x1b[1G✻\x1b[5Gliv\x1b[12Gng\r").encode(),
+            buf, seen, pending, h, sid,
+        )
+        # "Galliving" must not appear as a corrupted catch
+        assert "Galliving" not in seen
+        assert len(seen) == 1
+
+    def test_cr_between_full_frames_with_cursor_moves_in_second(self):
+        """First word via full frame, second word starts with cursor moves."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Word 1: clean full frame
+        buf = w.process_chunk("✶ Pondering…\r".encode(), buf, seen, pending, h, sid)
+        assert "Pondering" in seen
+
+        # Word 2: arrives via cursor positioning — cursor jump to col 3
+        # already positions past the space, so no literal space needed
+        buf = w.process_chunk(
+            ("\x1b[1G✻\x1b[3GBewildering…\r").encode(),
+            buf, seen, pending, h, sid,
+        )
+        assert "Bewildering" in seen
+        assert len(seen) == 2
+
+    def test_rapid_spinner_cycling_with_cursor_moves(self):
+        """Many rapid spinner-only updates (no word change) via cursor positioning."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        buf = w.process_chunk("✶ Transmuting…".encode(), buf, seen, pending, h, sid)
+        assert "Transmuting" in seen
+
+        # 6 rapid spinner-only updates: only the spinner char at col 1 changes
+        spinners = "·✢✳✶✻✽"
+        for ch in spinners:
+            buf = w.process_chunk(
+                ("\r\x1b[1G" + ch + "\r").encode(),
+                buf, seen, pending, h, sid,
+            )
+
+        # Still only one word, no corruption
+        assert len(seen) == 1
+        assert "Transmuting" in seen
+
+    # --- Edge cases ---
+
+    def test_cursor_move_at_chunk_boundary(self):
+        """Cursor move sequence split across two chunks."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # First chunk ends mid-escape: \x1b[10
+        buf = w.process_chunk(("✶ Rumbling…\x1b[10").encode(), buf, seen, pending, h, sid)
+        assert "Rumbling" in seen
+        # Second chunk completes the escape: G + new content
+        buf = w.process_chunk(("Gxyz").encode(), buf, seen, pending, h, sid)
+        # The incomplete escape from chunk 1 should not cause issues
+        # "xyz" should not form a corrupted word with prior content
+        assert len(seen) == 1
+
+    def test_no_false_spaces_without_cursor_moves(self):
+        """Normal text without cursor moves should NOT get extra spaces."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Send the word but don't let it get consumed — verify pre-detection buf
+        buf = w.process_chunk("✶ Flourish".encode(), buf, seen, pending, h, sid)
+        assert not seen  # not yet complete (no …)
+        # Buffer should contain the text without spurious spaces
+        assert "✶ Flourish" in buf
+        # Now complete the word
+        buf = w.process_chunk("ing…".encode(), buf, seen, pending, h, sid)
+        assert "Flourishing" in seen
+
+    def test_legitimate_word_not_broken_by_unrelated_cursor_moves(self):
+        """Cursor moves BEFORE a complete word should not prevent capture."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Cursor positioning prefix, then a full clean word
+        chunk = ("\x1b[1G\x1b[2K✶ Crystallizing…").encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Crystallizing" in seen
+
+    def test_word_with_hyphen_survives_cursor_moves(self):
+        """Hyphenated words like 'Re-analyzing' should still capture correctly."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        buf = w.process_chunk("✻ Re-analyzing…".encode(), buf, seen, pending, h, sid)
+        assert "Re-analyzing" in seen
+
+        # Differential update that doesn't touch the word
+        buf = w.process_chunk(("\r\x1b[1G✽\r").encode(), buf, seen, pending, h, sid)
+        assert len(seen) == 1
+
+    def test_buffer_does_not_grow_unbounded_with_cursor_moves(self):
+        """Buffer should stay capped at 500 chars even with many cursor move spaces."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Send many chunks with cursor moves — each adds spaces
+        for i in range(100):
+            chunk = ("\x1b[1Ga\x1b[50Gb\x1b[80Gc").encode()
+            buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert len(buf) <= 500
+
+    def test_mixed_dec_and_cursor_moves(self):
+        """DEC private sequences and cursor moves interleaved."""
+        w, buf, seen, pending, h, sid = self._make_env()
+        # Cursor jump to col 3 already positions past the space, so the
+        # space between spinner and word comes from the cursor move → space.
+        chunk = (
+            "\x1b[?2026h"      # DEC: start synchronized output
+            "\x1b[1G"          # cursor move: col 1
+            "✶"
+            "\x1b[3G"          # cursor move: col 3 (provides the space)
+            "Embellishing…"
+            "\x1b[?2026l"      # DEC: end synchronized output
+        ).encode()
+        buf = w.process_chunk(chunk, buf, seen, pending, h, sid)
+        assert "Embellishing" in seen
+        assert "?" not in buf
+        assert "2026" not in buf
+
+    def test_successive_words_across_differential_frames(self):
+        """Two different words captured across multiple differential render cycles."""
+        w, buf, seen, pending, h, sid = self._make_env()
+
+        # Word 1: full render
+        buf = w.process_chunk("✶ Cascading…".encode(), buf, seen, pending, h, sid)
+        assert "Cascading" in seen
+        assert pending["word"] == "Cascading"
+
+        # Differential spinner updates (word doesn't change)
+        for ch in "✳✻✽":
+            buf = w.process_chunk(
+                ("\r\x1b[1G" + ch + "\r").encode(),
+                buf, seen, pending, h, sid,
+            )
+        assert len(seen) == 1
+
+        # Word 2: new full render replaces the line
+        buf = w.process_chunk("\r✶ Dissolving…".encode(), buf, seen, pending, h, sid)
+        assert "Dissolving" in seen
+        assert pending["word"] == "Dissolving"
+        assert len(seen) == 2
+
+        # More differential updates for word 2
+        buf = w.process_chunk(
+            ("\r\x1b[1G✻\x1b[8Gvi\r").encode(),
+            buf, seen, pending, h, sid,
+        )
+        # No corruption
+        assert len(seen) == 2
+
 
 # ===========================================================================
 # flush_pending
