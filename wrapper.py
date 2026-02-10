@@ -23,7 +23,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -178,6 +178,55 @@ def _check_api_key() -> tuple[str, str]:
     if api_key:
         return ("error", "invalid API key format")
     return ("error", "no API key set")
+
+
+def _check_spinner_verbs() -> bool:
+    """Return True if user has custom spinnerVerbs in Claude settings."""
+    try:
+        with open(SETTINGS_FILE) as f:
+            cfg = json.load(f)
+        sv = cfg.get("spinnerVerbs")
+        if not sv or not isinstance(sv, dict):
+            return False
+        verbs = sv.get("verbs", [])
+        return bool(verbs)
+    except Exception:
+        return False
+
+
+def _is_cloud_mode() -> bool:
+    """Return True if running in cloud mode (has valid API key, not local)."""
+    status, _ = _check_api_key()
+    return status == "cloud"
+
+
+def _should_bypass() -> bool:
+    """Return True if wrapper should bypass PTY (cloud + custom spinnerVerbs)."""
+    return _is_cloud_mode() and _check_spinner_verbs()
+
+
+def _bypass_claude() -> None:
+    """Print warning and exec Claude directly without PTY wrapping."""
+    YELLOW = "\033[33m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    MAGENTA = "\033[35m"
+    BOLD = "\033[1m"
+    CYAN = "\033[36m"
+
+    print(
+        f"{BOLD}{MAGENTA}claudemon{RESET} {CYAN}v{VERSION}{RESET} — "
+        f"{YELLOW}⚠ custom spinnerVerbs detected — wrapper disabled{RESET}",
+        file=sys.stderr,
+    )
+    print(
+        f"  {DIM}remove spinnerVerbs from ~/.claude/settings.json to enable catching{RESET}",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+
+    claude = find_claude()
+    os.execvp(claude, [claude] + sys.argv[1:])
 
 
 def _check_engine_health():
@@ -449,6 +498,9 @@ def find_claude() -> str:
 
 
 def _main_posix() -> None:
+    if _should_bypass():
+        _bypass_claude()
+
     import fcntl
     import pty
     import select
@@ -544,6 +596,9 @@ def _main_posix() -> None:
 
 
 def _main_windows() -> None:
+    if _should_bypass():
+        _bypass_claude()
+
     import threading
 
     try:

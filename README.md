@@ -30,6 +30,8 @@ cc "fix the auth bug"
 
 Catches happen automatically. That's it.
 
+> The `cc` alias is just a convention — you can rename it to anything in your shell config (`alias myclaude='python3 /path/to/wrapper.py'`).
+
 ## How It Works
 
 ```
@@ -68,6 +70,8 @@ cc engine reset            Reset engine state and restart
 | `CLAUDEMON_API_KEY` | Your API key (get it from [the dashboard](https://claudemon.zwyk-studio.com/dashboard/settings)) |
 | `CLAUDEMON_MODE=local` | SQLite only, no cloud sync |
 | `CLAUDEMON_CLOUD_URL` | Point to a custom/dev platform |
+
+> **Note:** If you have custom `spinnerVerbs` in `~/.claude/settings.json`, the wrapper disables itself automatically (word capture relies on default spinner verbs). Remove `spinnerVerbs` to re-enable catching.
 
 ## MCP Server
 

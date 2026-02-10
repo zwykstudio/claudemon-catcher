@@ -3,6 +3,12 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] - 2026-02-10
+
+### Added
+- Auto-bypass when custom `spinnerVerbs` detected in Claude settings — wrapper disables PTY capture gracefully and shows a warning
+- Note in README about spinnerVerbs compatibility
+
 ## [0.2.6] - 2026-02-10
 
 ### Fixed
