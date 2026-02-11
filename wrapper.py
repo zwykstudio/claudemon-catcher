@@ -725,7 +725,18 @@ def _cmd_update() -> None:
             if line.strip():
                 print(f"    {DIM}{line}{RESET}", file=sys.stderr)
 
-    # 2. Restart engine
+    # 2. Install missing dependencies
+    for dep in ("certifi", "cryptography"):
+        try:
+            __import__(dep)
+        except ImportError:
+            print(f"  Installing {dep}...", file=sys.stderr)
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", dep],
+                capture_output=True, timeout=30,
+            )
+
+    # 3. Restart engine
     import time as _time
 
     from cli.engine_commands import _is_running, _restart
@@ -739,7 +750,7 @@ def _cmd_update() -> None:
     else:
         print(f"  {YELLOW}⚠{RESET} Engine restart failed — run: cc engine restart", file=sys.stderr)
 
-    # 3. Clear version cache so next launch shows fresh status
+    # 4. Clear version cache so next launch shows fresh status
     try:
         os.remove(VERSION_CHECK_FILE)
     except OSError:

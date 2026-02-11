@@ -78,21 +78,23 @@ fi
 
 # 1. Install Python dependencies
 echo "→ Checking Python dependencies..."
-if python3 -c "import cryptography" 2>/dev/null; then
-    echo "  ✓ cryptography already installed"
-else
-    echo "  Installing cryptography..."
-    if [[ "$OS" == "macos" ]]; then
-        pip3 install --user -q cryptography 2>/dev/null || \
-        pip3 install -q cryptography --break-system-packages 2>/dev/null || \
-        { echo "  ✗ Failed to install. Run: brew install python-cryptography"; exit 1; }
+for DEP in cryptography certifi; do
+    if python3 -c "import $DEP" 2>/dev/null; then
+        echo "  ✓ $DEP already installed"
     else
-        pip3 install --user -q cryptography 2>/dev/null || \
-        pip3 install -q cryptography --break-system-packages 2>/dev/null || \
-        { echo "  ✗ Failed to install. Run: sudo apt install python3-cryptography (or equivalent)"; exit 1; }
+        echo "  Installing $DEP..."
+        if [[ "$OS" == "macos" ]]; then
+            pip3 install --user -q "$DEP" 2>/dev/null || \
+            pip3 install -q "$DEP" --break-system-packages 2>/dev/null || \
+            { echo "  ✗ Failed to install $DEP. Run: pip3 install $DEP"; exit 1; }
+        else
+            pip3 install --user -q "$DEP" 2>/dev/null || \
+            pip3 install -q "$DEP" --break-system-packages 2>/dev/null || \
+            { echo "  ✗ Failed to install $DEP. Run: pip3 install $DEP"; exit 1; }
+        fi
+        echo "  ✓ $DEP installed"
     fi
-    echo "  ✓ cryptography installed"
-fi
+done
 echo ""
 
 # 2. Configuration — determine mode and collect env vars
