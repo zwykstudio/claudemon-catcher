@@ -23,7 +23,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.2.8"
+VERSION = "0.2.9"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -337,6 +337,41 @@ def _check_update() -> tuple:
         return ("error", "")
 
 
+def _auto_update() -> bool:
+    """Pull latest code and install missing deps. Returns True on success."""
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        r = subprocess.run(
+            ["git", "-C", repo_dir, "pull", "--ff-only"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return False
+    except Exception:
+        return False
+
+    # Install missing dependencies
+    for dep in ("certifi", "cryptography"):
+        try:
+            __import__(dep)
+        except ImportError:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", dep],
+                    capture_output=True, timeout=30,
+                )
+            except Exception:
+                pass
+
+    # Clear version cache
+    try:
+        os.remove(VERSION_CHECK_FILE)
+    except OSError:
+        pass
+
+    return True
+
+
 def print_banner() -> None:
     """Print a single-line startup banner before launching Claude."""
     DIM = "\033[2m"
@@ -357,11 +392,16 @@ def print_banner() -> None:
     MAGENTA = "\033[35m"
     BOLD = "\033[1m"
 
-    update_status, update_msg = _check_update()
+    update_status, _ = _check_update()
     if update_status == "current":
         ver_suffix = f" {DIM}✓ up to date{RESET}"
     elif update_status == "behind":
-        ver_suffix = f" {YELLOW}↑ update available{RESET}"
+        print(f"{BOLD}{MAGENTA}claudemon{RESET} {CYAN}v{VERSION}{RESET} {YELLOW}↑ updating...{RESET}", file=sys.stderr)
+        if _auto_update():
+            print(f"  {GREEN}✓{RESET} Updated successfully", file=sys.stderr)
+        else:
+            print(f"  {YELLOW}⚠ auto-update failed — run manually: cc update{RESET}", file=sys.stderr)
+        ver_suffix = ""
     else:
         ver_suffix = ""
 
@@ -377,9 +417,6 @@ def print_banner() -> None:
         print(f"  {YELLOW}⚠ engine not running — run: cc engine restart{RESET}", file=sys.stderr)
     elif isinstance(engine_ok, str):
         print(f"  {YELLOW}⚠ engine error: {engine_ok}{RESET}", file=sys.stderr)
-
-    if update_msg:
-        print(f"  {YELLOW}◆ {update_msg}{RESET}", file=sys.stderr)
 
     if not _check_statusline():
         print(

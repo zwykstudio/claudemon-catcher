@@ -55,6 +55,29 @@ class TestGetStorage:
 
 
 # ===========================================================================
+# SSL context with certifi
+# ===========================================================================
+
+class TestSSLContext:
+    """_SSL_CONTEXT uses certifi CA bundle when available."""
+
+    def test_ssl_context_is_set(self):
+        import ssl
+
+        from engine.storage import _SSL_CONTEXT
+
+        assert isinstance(_SSL_CONTEXT, ssl.SSLContext)
+
+    def test_https_connection_uses_ssl_context(self, monkeypatch):
+        monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
+        monkeypatch.setenv("CLAUDEMON_CLOUD_URL", "https://example.com")
+        from engine.storage import _SSL_CONTEXT, CloudStorage
+        cs = CloudStorage()
+        conn = cs._get_conn()
+        assert conn._context is _SSL_CONTEXT
+
+
+# ===========================================================================
 # CloudStorage connection pooling
 # ===========================================================================
 

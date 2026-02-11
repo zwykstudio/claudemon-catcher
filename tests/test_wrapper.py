@@ -957,19 +957,135 @@ class TestCheckUpdate:
         assert data["remote"] == "abc123"
 
 
-class TestBannerShowsUpdate:
-    """print_banner() shows update status inline and detail line."""
+class TestAutoUpdate:
+    """_auto_update() pulls code and installs missing deps."""
 
-    def test_shows_update_in_banner(self, capsys, monkeypatch):
+    def test_success_returns_true(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", str(tmp_path / "version.check"))
+        # Create cache file so we can verify it gets deleted
+        cache = tmp_path / "version.check"
+        cache.write_text("{}")
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+                stdout = "Updating abc..def\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        assert w._auto_update() is True
+        assert not cache.exists()  # cache cleared
+
+    def test_git_pull_failure_returns_false(self, monkeypatch):
+        w = _import_wrapper()
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 1
+                stdout = ""
+                stderr = "error: cannot pull"
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        assert w._auto_update() is False
+
+    def test_git_exception_returns_false(self, monkeypatch):
+        w = _import_wrapper()
+
+        def fake_run(cmd, **kw):
+            raise OSError("git not found")
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+        assert w._auto_update() is False
+
+    def test_installs_missing_deps(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", str(tmp_path / "version.check"))
+
+        pip_calls = []
+
+        def fake_run(cmd, **kw):
+            if "pip" in cmd:
+                pip_calls.append(cmd)
+            class R:
+                returncode = 0
+                stdout = "ok\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+
+        # Simulate certifi missing
+        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        def fake_import(name, *args, **kwargs):
+            if name == "certifi":
+                raise ImportError("no certifi")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        w._auto_update()
+        monkeypatch.setattr("builtins.__import__", original_import)
+
+        # Should have tried to pip install certifi
+        assert any("certifi" in str(c) for c in pip_calls)
+
+    def test_pip_failure_does_not_crash(self, tmp_path, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setattr(w, "VERSION_CHECK_FILE", str(tmp_path / "version.check"))
+
+        call_count = [0]
+
+        def fake_run(cmd, **kw):
+            call_count[0] += 1
+            if "pip" in cmd:
+                raise OSError("pip broken")
+            class R:
+                returncode = 0
+                stdout = "ok\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(w.subprocess, "run", fake_run)
+
+        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        def fake_import(name, *args, **kwargs):
+            if name in ("certifi", "cryptography"):
+                raise ImportError(f"no {name}")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        # Should not raise even though pip fails
+        result = w._auto_update()
+        monkeypatch.setattr("builtins.__import__", original_import)
+        assert result is True  # git pull succeeded, pip failures are non-fatal
+
+
+class TestBannerShowsUpdate:
+    """print_banner() shows update status inline and triggers auto-update."""
+
+    def test_auto_updates_when_behind(self, capsys, monkeypatch):
         w = _import_wrapper()
         monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
         monkeypatch.setattr(w, "_check_statusline", lambda: True)
         monkeypatch.setattr(w, "_check_update", lambda: ("behind", "update available — run: cc update"))
+        monkeypatch.setattr(w, "_auto_update", lambda: True)
         w.print_banner()
         err = capsys.readouterr().err
-        assert "update available" in err
-        assert "↑" in err
-        assert "◆" in err
+        assert "updating..." in err
+        assert "Updated successfully" in err
+
+    def test_shows_fallback_on_auto_update_failure(self, capsys, monkeypatch):
+        w = _import_wrapper()
+        monkeypatch.setenv("CLAUDEMON_API_KEY", "sk_claudemon_test")
+        monkeypatch.setattr(w, "_check_statusline", lambda: True)
+        monkeypatch.setattr(w, "_check_update", lambda: ("behind", "update available — run: cc update"))
+        monkeypatch.setattr(w, "_auto_update", lambda: False)
+        w.print_banner()
+        err = capsys.readouterr().err
+        assert "auto-update failed" in err
+        assert "cc update" in err
 
     def test_shows_up_to_date(self, capsys, monkeypatch):
         w = _import_wrapper()

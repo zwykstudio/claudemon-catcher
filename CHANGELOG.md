@@ -3,6 +3,16 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.9] - 2026-02-11
+
+### Added
+- Auto-update on launch — when a new version is detected, `git pull` + dependency install runs automatically before launching Claude
+- `certifi` added as a project dependency for SSL certificate verification
+- `setup.sh` and `cc update` now install missing Python dependencies (`certifi`, `cryptography`)
+
+### Fixed
+- SSL `CERTIFICATE_VERIFY_FAILED` on macOS with python.org/pyenv installs — uses `certifi` CA bundle
+
 ## [0.2.8] - 2026-02-11
 
 ### Fixed
