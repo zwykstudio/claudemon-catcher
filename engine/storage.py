@@ -19,6 +19,12 @@ import json
 import os
 import ssl
 import time
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = ssl.create_default_context()
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -118,7 +124,7 @@ class CloudStorage:
         if self._scheme == "https":
             self._conn = http.client.HTTPSConnection(
                 self._host, self._port, timeout=self.timeout,
-                context=ssl.create_default_context(),
+                context=_SSL_CONTEXT,
             )
         else:
             self._conn = http.client.HTTPConnection(

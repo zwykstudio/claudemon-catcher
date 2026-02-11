@@ -3,6 +3,12 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] - 2026-02-11
+
+### Fixed
+- SSL `CERTIFICATE_VERIFY_FAILED` on macOS with python.org/pyenv installs — now uses `certifi` CA bundle as fallback
+- Added `certifi` as a dependency
+
 ## [0.2.7] - 2026-02-10
 
 ### Added
