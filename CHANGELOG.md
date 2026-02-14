@@ -3,6 +3,12 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.10] - 2026-02-14
+
+### Improved
+- Session recap now displays header instantly on exit instead of waiting silently for engine sync
+- Shows "syncing catches…" indicator when engine data isn't ready yet (previously: blank screen for up to 1.2s)
+
 ## [0.2.9] - 2026-02-11
 
 ### Added

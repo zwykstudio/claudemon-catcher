@@ -456,12 +456,23 @@ def print_recap(sid: str, seen: set, start_time: float) -> None:
     local_catches = list(_session_catches)
     total_dur = sum(c["duration"] for c in local_catches)
 
+    elapsed = time.time() - start_time
+    elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s" if elapsed >= 60 else f"{elapsed:.0f}s"
+
+    out = sys.stderr
+
+    # Print header immediately so user sees feedback right away
+    print(file=out)
+    print(f"{BOLD}{MAGENTA}claudemon{RESET} {DIM}session recap{RESET}", file=out)
+    print(f"{DIM}{'─' * 38}{RESET}", file=out)
+
     # Try to enrich with engine data (XP, events) — best effort
     sl_file = os.path.join(STATUSLINE_LIVE_DIR, f"statusline-{sid}.json")
     engine_data = {}
     total_xp = 0
+    showed_sync = False
     try:
-        for _ in range(4):
+        for attempt in range(4):
             try:
                 with open(sl_file) as f:
                     sl_data = json.load(f)
@@ -472,17 +483,14 @@ def print_recap(sid: str, seen: set, start_time: float) -> None:
                     break
             except (OSError, json.JSONDecodeError):
                 pass
+            if not showed_sync:
+                print(f"  {DIM}syncing catches…{RESET}", end="", flush=True, file=out)
+                showed_sync = True
             time.sleep(0.3)
     except KeyboardInterrupt:
         pass
-
-    elapsed = time.time() - start_time
-    elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s" if elapsed >= 60 else f"{elapsed:.0f}s"
-
-    out = sys.stderr
-    print(file=out)
-    print(f"{BOLD}{MAGENTA}claudemon{RESET} {DIM}session recap{RESET}", file=out)
-    print(f"{DIM}{'─' * 38}{RESET}", file=out)
+    if showed_sync:
+        print(f"\r{' ' * 30}\r", end="", flush=True, file=out)
 
     for c in local_catches:
         word = c["word"]
