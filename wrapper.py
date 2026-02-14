@@ -23,7 +23,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.2.9"
+VERSION = "0.2.10"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
