@@ -3,6 +3,11 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.11] - 2026-02-24
+
+### Fixed
+- Word detection now captures slang/colloquial spinner words ending in `in'` (e.g. "Beboppin'") instead of only `ing`
+
 ## [0.2.10] - 2026-02-14
 
 ### Improved

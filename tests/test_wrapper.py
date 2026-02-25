@@ -20,7 +20,7 @@ class TestWordRegex:
 
     def test_word_regex_valid(self):
         w = _import_wrapper()
-        for text in ["✶ Reasoning…", "· Thinking…", "✻ Re-analyzing…"]:
+        for text in ["✶ Reasoning…", "· Thinking…", "✻ Re-analyzing…", "✶ Beboppin'…"]:
             matches = w.WORD_RE.findall(text)
             assert matches, f"Expected match in {text!r}"
 

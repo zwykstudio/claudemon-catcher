@@ -23,7 +23,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.2.10"
+VERSION = "0.2.11"
 CATCHES_FILE = os.path.expanduser("~/.claudemon/catches.jsonl")
 VERSION_CHECK_FILE = os.path.expanduser("~/.claudemon/version.check")
 VERSION_CHECK_TTL = 86400  # 24 hours
@@ -35,7 +35,7 @@ _debug_f = None
 ANSI_RE = re.compile(r"\x1b\[\??[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]")
 CURSOR_MOVE_RE = re.compile(r"\x1b\[[0-9;]*[ABCDEFGHdf]")
 SPINNER_CHARS = "·✢✳✶✻✽"
-WORD_RE = re.compile(r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z-]*ing)…")
+WORD_RE = re.compile(r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z-]*in[g'])…")
 
 
 def _close_debug():
