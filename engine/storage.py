@@ -33,6 +33,8 @@ from typing import Optional
 
 SAAS_URL = "https://claudemon.zwyk-studio.com"
 
+from _version import VERSION as _CATCHER_VERSION
+
 
 class ConfigError(Exception):
     """Raised when Claudemon configuration is invalid or incomplete."""
@@ -212,7 +214,7 @@ class CloudStorage:
         return None
 
     def catch(self, word: str, ts: float = None, proof: str = None, sid: str = None, duration: float = None) -> Optional[CatchResult]:
-        payload = {"word": word}
+        payload = {"word": word, "v": _CATCHER_VERSION}
         if ts is not None:
             payload["ts"] = ts
         if proof is not None:

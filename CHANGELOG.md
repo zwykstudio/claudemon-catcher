@@ -3,6 +3,14 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.12] - 2026-02-25
+
+### Added
+- Catcher version sent with every catch (`v` field in sync payload) for server-side tracking and false positive debugging
+
+### Changed
+- Version is now single-sourced from `pyproject.toml` via `_version.py` (removed hardcoded `VERSION` from `wrapper.py`)
+
 ## [0.2.11] - 2026-02-24
 
 ### Fixed
