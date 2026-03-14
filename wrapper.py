@@ -123,6 +123,10 @@ def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, 
         pending["last_seen"] = time.time()
 
     word = (WORD_RE.findall(buf) or [None])[-1]
+    if word:
+        # Normalize slang: "Thinkin'" → "Thinking"
+        if word.endswith("in'"):
+            word = word[:-3] + "ing"
     if word and word not in seen:
         ts = time.time()
         proof = hmac.new(session_hash.digest(), f"{word}:{ts}".encode(), hashlib.sha256).hexdigest()[:16]
