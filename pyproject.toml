@@ -1,6 +1,6 @@
 [project]
 name = "claudemon-catcher"
-version = "0.2.14"
+version = "0.2.15"
 description = "Catch spinner words from Claude Code"
 requires-python = ">=3.10"
 license = "MIT"

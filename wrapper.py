@@ -588,7 +588,15 @@ def _main_posix() -> None:
         os.setsid()
         for fd in (0, 1, 2):
             os.dup2(slave, fd)
-        os.close(slave)
+        if slave > 2:
+            os.close(slave)
+        # Acquire the slave as the controlling terminal so SIGWINCH
+        # (and other tty signals) are delivered to Claude on resize.
+        try:
+            tmp_fd = os.open(os.ttyname(0), os.O_RDWR)
+            os.close(tmp_fd)
+        except OSError:
+            pass
         os.execvp(claude, [claude] + sys.argv[1:])
 
     os.close(slave)
