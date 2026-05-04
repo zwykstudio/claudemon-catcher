@@ -553,6 +553,7 @@ def _main_posix() -> None:
     import fcntl
     import pty
     import select
+    import signal
     import termios
     import tty
 
@@ -564,6 +565,15 @@ def _main_posix() -> None:
 
     master, slave = pty.openpty()
     fcntl.fcntl(master, fcntl.F_SETFL, fcntl.fcntl(master, fcntl.F_GETFL) | os.O_NONBLOCK)
+
+    def _sync_winsize(target_fd):
+        try:
+            sz = fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+            fcntl.ioctl(target_fd, termios.TIOCSWINSZ, sz)
+        except (OSError, ValueError):
+            pass
+
+    _sync_winsize(slave)
 
     old_tty = None
     try:
@@ -582,6 +592,15 @@ def _main_posix() -> None:
         os.execvp(claude, [claude] + sys.argv[1:])
 
     os.close(slave)
+
+    def _on_winch(_signum, _frame):
+        _sync_winsize(master)
+
+    try:
+        signal.signal(signal.SIGWINCH, _on_winch)
+    except (OSError, ValueError):
+        pass
+
     buf, seen, pending = "", set(), {}
     session_hash = hashlib.sha256()
     start_time = time.time()
