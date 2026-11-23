@@ -3,6 +3,11 @@
 All notable changes to Claudemon Catcher are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions use [Semantic Versioning](https://semver.org/).
 
+## [0.2.16] - 2026-11-23
+
+### Fixed
+- Accented spinner words ("Flambéing", "Sautéing") are now captured; accents are stripped before sync ("Flambeing", "Sauteing") since the platform only accepts ASCII words
+
 ## [0.2.12] - 2026-02-25
 
 ### Added

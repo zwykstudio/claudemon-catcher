@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 import uuid
 
 from _version import VERSION
@@ -35,7 +36,15 @@ _debug_f = None
 ANSI_RE = re.compile(r"\x1b\[\??[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]")
 CURSOR_MOVE_RE = re.compile(r"\x1b\[[0-9;]*[ABCDEFGHdf]")
 SPINNER_CHARS = "·✢✳✶✻✽"
-WORD_RE = re.compile(r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z-]*in[g'])…")
+# Letters include Latin-1 accents (e.g. "Flambéing", "Sautéing") and combining marks.
+WORD_RE = re.compile(
+    r"[" + re.escape(SPINNER_CHARS) + r"]\s?([A-Z][a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF\u0300-\u036F-]*in[g'])…"
+)
+
+
+def _strip_accents(word: str) -> str:
+    """'Flambéing' → 'Flambeing' (platform only accepts ASCII words)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", word) if not unicodedata.combining(c))
 
 
 def _close_debug():
@@ -127,6 +136,7 @@ def process_chunk(raw: bytes, buf: str, seen: set, pending: dict, session_hash, 
         # Normalize slang: "Thinkin'" → "Thinking"
         if word.endswith("in'"):
             word = word[:-3] + "ing"
+        word = _strip_accents(word)
     if word and word not in seen:
         ts = time.time()
         proof = hmac.new(session_hash.digest(), f"{word}:{ts}".encode(), hashlib.sha256).hexdigest()[:16]

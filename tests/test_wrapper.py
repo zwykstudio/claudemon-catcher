@@ -20,7 +20,7 @@ class TestWordRegex:
 
     def test_word_regex_valid(self):
         w = _import_wrapper()
-        for text in ["✶ Reasoning…", "· Thinking…", "✻ Re-analyzing…", "✶ Beboppin'…"]:
+        for text in ["✶ Reasoning…", "· Thinking…", "✻ Re-analyzing…", "✶ Beboppin'…", "✻ Flambéing…", "· Sautéing…"]:
             matches = w.WORD_RE.findall(text)
             assert matches, f"Expected match in {text!r}"
 
@@ -52,6 +52,14 @@ class TestProcessChunk:
         buf = w.process_chunk("✢ Reasoning…".encode(), buf, seen, pending, h, sid)
         assert "Reasoning" in pending.get("word", "")
         assert "Reasoning" in seen
+
+    def test_process_chunk_strips_accents(self):
+        w, buf, seen, pending, h, sid = self._make_env()
+        w.process_chunk("✻ Flambéing…".encode(), buf, seen, pending, h, sid)
+        assert pending.get("word") == "Flambeing"
+        w, buf, seen, pending, h, sid = self._make_env()
+        w.process_chunk("✻ Saute\u0301ing…".encode(), buf, seen, pending, h, sid)  # decomposed é
+        assert pending.get("word") == "Sauteing"
 
     def test_process_chunk_emits_on_second_word(self, tmp_path):
         w, buf, seen, pending, h, sid = self._make_env()
